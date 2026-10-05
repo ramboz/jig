@@ -1461,3 +1461,19 @@ gates on `(current, new)` and stamps `review_reopened_at` on every back-edge.
 Re-entry then needs strictly-newer verdicts: event-keyed, with no mtime or git
 inspection. When a lifecycle doc names a back-edge, test that it is reachable
 *and* that the forward gates do not fire on it.
+
+**Scope "show once" state to the repository, not the checkout (bug 040 / issue 231).**
+The semantic-index hook kept its "already suggested" record in the
+checkout's gitignored `.jig/`, while its contract ("at most one suggestion")
+is per repository. That held while a repo had one long-lived checkout. Hosts
+that create a fresh worktree per session (GitHub Copilot CLI) made every
+session a first run, so the suggestion repeated forever. Committing state could
+not help: the state schema read explicit `"auto_attach": false` the same as an
+absent key, so the obvious workaround (which an issue and a docs PR both
+recommended) did nothing. The fix stores the record under
+`<git-common-dir>/jig/`, which all worktrees of a clone share, and treats an
+explicit `false` as a committed decline. Any once-per-project nudge jig adds
+should store its marker at repository scope (`semantic_index.suggestion_state_path`)
+and offer a tracked opt-out. Test both with a real `git worktree add`, not one
+directory run twice. Suggestion text an agent reads should also say *who*
+acts and *where*: "Install it" invites an in-sandbox install attempt.

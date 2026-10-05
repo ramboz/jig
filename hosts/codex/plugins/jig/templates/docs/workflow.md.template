@@ -136,6 +136,24 @@ project has not opted in—or none is installed—the host gets at most one comp
 actionable suggestion. Explicit provider choices never silently fall through.
 The hook never installs providers, downloads models, or blocks a workflow.
 
+**Opting out, and hosts with a worktree per session.** To decline the semantic
+index and silence every suggestion, commit an explicit opt-out:
+
+```json
+{
+  "auto_attach": false
+}
+```
+
+An explicit `false` is a recorded decline; leaving the key out is not. Commit
+`.jig/semantic-index.json` (opt-in or opt-out) to the branch your worktrees are
+cut from, because hosts such as the GitHub Copilot CLI create a fresh worktree
+per session and only see committed project state. The "already suggested"
+record itself lives in the clone's git directory (`<git-common-dir>/jig/`), so
+it is shared by every worktree of that clone and needs no committing. A missing
+provider has to be installed on the host from your own shell; sandboxed agent
+sessions cannot install it, and jig never tries.
+
 ## Hook Strictness Profiles
 
 jig hooks support three enforcement levels via the `SCAFFOLD_HOOK_PROFILE` env var:

@@ -256,5 +256,93 @@ class SemanticIndexHookTests(unittest.TestCase):
         self.assertGreaterEqual(semantic_hook.get("timeout", 0), 25)
 
 
+class Bug040RepoScopedSuggestionTests(unittest.TestCase):
+    """Bug 040: the suggestion is once per repository, not per checkout.
+
+    Hosts that cut a fresh worktree per session (Copilot CLI) must not see the
+    missing-provider suggestion again, and a committed explicit
+    ``"auto_attach": false`` must silence it.
+    """
+
+    REAL_COMMON = REPO_ROOT / "skills" / "_common"
+
+    def setUp(self):
+        self.tmpdir = Path(tempfile.mkdtemp(prefix="jig-bug-040-"))
+        self.repo = self.tmpdir / "repo"
+        self.repo.mkdir()
+
+    def tearDown(self):
+        import shutil
+        shutil.rmtree(self.tmpdir, ignore_errors=True)
+
+    def _git(self, *args, cwd=None):
+        subprocess.run(
+            ["git", *args],
+            cwd=cwd or self.repo,
+            check=True,
+            capture_output=True,
+            text=True,
+        )
+
+    def _init_repo(self, state: dict):
+        self._git("init", "-q", "-b", "main")
+        self._git("config", "user.email", "t@example.com")
+        self._git("config", "user.name", "t")
+        (self.repo / ".jig").mkdir()
+        (self.repo / ".jig" / "semantic-index.json").write_text(json.dumps(state))
+        self._git("add", ".jig/semantic-index.json")
+        self._git("-c", "commit.gpgsign=false", "commit", "-q", "--no-verify", "-m", "opt-in")
+
+    def _worktree(self, name: str) -> Path:
+        path = self.tmpdir / name
+        self._git("worktree", "add", "-q", str(path), "-b", name)
+        return path
+
+    def _run(self, project_dir: Path):
+        env = os.environ.copy()
+        env["CLAUDE_PROJECT_DIR"] = str(project_dir)
+        env["JIG_SEMANTIC_INDEX_COMMON_DIR"] = str(self.REAL_COMMON)
+        env.pop("CLAUDE_PLUGIN_ROOT", None)
+        env.pop("JIG_SEMANTIC_INDEX_INTERNAL", None)
+        return subprocess.run(
+            ["bash", str(HOOK)],
+            input=json.dumps({"session_id": "s", "hook_event_name": "SessionStart"}),
+            capture_output=True,
+            text=True,
+            env=env,
+        )
+
+    def test_missing_provider_suggestion_not_repeated_in_fresh_worktree(self):
+        self._init_repo({"auto_attach": True, "provider": "bug040-absent-provider"})
+
+        first = self._run(self.repo)
+        again = self._run(self.repo)
+        fresh = self._run(self._worktree("session-2"))
+
+        self.assertEqual(first.returncode, 0, first.stderr)
+        msg = parse_stdout(first)["additionalContext"]
+        self.assertIn("bug040-absent-provider", msg)
+        self.assertIsNone(parse_stdout(again))
+        self.assertIsNone(parse_stdout(fresh), "re-suggested in a fresh worktree")
+
+    def test_committed_auto_attach_false_silences_missing_provider(self):
+        self._init_repo({"auto_attach": False, "provider": "bug040-absent-provider"})
+
+        primary = self._run(self.repo)
+        fresh = self._run(self._worktree("session-2"))
+
+        self.assertEqual(primary.returncode, 0, primary.stderr)
+        self.assertIsNone(parse_stdout(primary))
+        self.assertIsNone(parse_stdout(fresh))
+
+    def test_missing_provider_text_points_install_outside_the_session(self):
+        self._init_repo({"auto_attach": True, "provider": "bug040-absent-provider"})
+
+        msg = parse_stdout(self._run(self.repo))["additionalContext"]
+
+        self.assertIn("own shell", msg)
+        self.assertIn('"auto_attach": false', msg)
+
+
 if __name__ == "__main__":
     unittest.main()

@@ -1405,6 +1405,9 @@ def _activation_bucket(event: dict) -> str:
         return "provider-missing"
     if outcome == "overlay_disabled":
         return "overlay-disabled"
+    if outcome == "opted_out":
+        # Bug 040: a committed "auto_attach": false is a decline, not a fault.
+        return "opted-out"
     return "activation-failed"
 
 

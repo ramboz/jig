@@ -32,11 +32,25 @@ def _common_dir(project_dir):
         return os.path.join(plugin_root, 'skills', '_common')
     return script_relative
 
-def _seen_path(project_dir):
+# The scaffold renderer swaps this host kwarg per host (Codex).
+ACTIVATE_KW = dict(host='codex')
+
+def _legacy_seen_path(project_dir):
     return Path(project_dir) / '.jig' / 'semantic-index-codex-hook.json'
 
-def _already_suggested(project_dir, key):
-    path = _seen_path(project_dir)
+def _seen_path(project_dir):
+    # Bug 040: repository-scoped (git common dir) so a fresh worktree per
+    # session does not re-show a suggestion; older helpers lack the function.
+    try:
+        import semantic_index
+        resolver = getattr(semantic_index, 'suggestion_state_path', None)
+        if resolver is not None:
+            return resolver(Path(project_dir), ACTIVATE_KW['host'])
+    except Exception:
+        pass
+    return _legacy_seen_path(project_dir)
+
+def _suggested_in(path, key):
     try:
         data = json.loads(path.read_text(encoding='utf-8'))
     except Exception:
@@ -44,8 +58,11 @@ def _already_suggested(project_dir, key):
     suggestions = data.get('suggestions') if isinstance(data, dict) else None
     return isinstance(suggestions, list) and key in suggestions
 
-def _mark_suggested(project_dir, key):
-    path = _seen_path(project_dir)
+def _already_suggested(path, project_dir, key):
+    return (_suggested_in(path, key)
+            or _suggested_in(_legacy_seen_path(project_dir), key))
+
+def _mark_suggested(path, key):
     try:
         data = json.loads(path.read_text(encoding='utf-8')) if path.is_file() else {}
         if not isinstance(data, dict):
@@ -70,9 +87,10 @@ def _message_for(result, project_dir):
         if profile == 'internal-overlay':
             return None
         key = f'{provider}:{action}:{outcome}'
-        if _already_suggested(project_dir, key):
+        seen = _seen_path(project_dir)
+        if _already_suggested(seen, project_dir, key):
             return None
-        _mark_suggested(project_dir, key)
+        _mark_suggested(seen, key)
         return getattr(result, 'recommendation', None)
     if action == 'fallback':
         return (
@@ -92,7 +110,7 @@ try:
         sys.path.insert(0, common_dir)
     import semantic_index
 
-    result = semantic_index.activate(Path(project_dir), host='codex')
+    result = semantic_index.activate(Path(project_dir), **ACTIVATE_KW)
     msg = _message_for(result, project_dir)
     if msg:
         try:
