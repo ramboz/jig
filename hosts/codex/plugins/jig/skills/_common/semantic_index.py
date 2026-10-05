@@ -25,6 +25,10 @@ except ImportError:  # pragma: no cover - supports direct script-style imports.
 
 STATE_RELATIVE_PATH = Path(".jig") / "semantic-index.json"
 TELEMETRY_RELATIVE_PATH = Path(".jig") / "semantic-index-events.jsonl"
+# Bug 040: host hooks' one-time suggestion record. Lives in the git common dir
+# so every worktree of a clone shares it (per-session-worktree hosts such as
+# Copilot CLI); falls back to the checkout's .jig/ outside git.
+SUGGESTION_STATE_NAME = "semantic-index-{host}-hook.json"
 PUBLIC_DEFAULT_PROVIDER = "tokensave"
 INTERNAL_OVERLAY_ENV = "JIG_SEMANTIC_INDEX_INTERNAL"
 PUBLIC_PROVIDER_CANDIDATES = (
@@ -48,6 +52,10 @@ class ActivationState:
     # public state schema remains unchanged; load_state sets it from key
     # presence to distinguish an explicit choice from the legacy default.
     provider_explicit: bool = field(default=False, compare=False, repr=False)
+    # Runtime-only: true when the file says JSON ``"auto_attach": false``.
+    # That is a committed decline (bug 040), distinct from an absent key, and
+    # silences every suggestion.
+    opted_out: bool = field(default=False, compare=False, repr=False)
 
 
 @dataclass(frozen=True)
@@ -247,6 +255,7 @@ def load_state(project_root: Path) -> ActivationState:
             and isinstance(raw.get("provider"), str)
             and bool(raw.get("provider"))
         ),
+        opted_out=raw.get("auto_attach", True) is False,
     )
 
 
@@ -261,6 +270,9 @@ def write_state(project_root: Path, state: ActivationState) -> Path:
     path.parent.mkdir(parents=True, exist_ok=True)
     payload = asdict(state)
     payload.pop("provider_explicit", None)
+    payload.pop("opted_out", None)
+    if not state.auto_attach and not state.opted_out:
+        payload.pop("auto_attach", None)
     if not state.provider_explicit and state.provider == PUBLIC_DEFAULT_PROVIDER:
         payload.pop("provider", None)
     payload["allowed_overlays"] = list(state.allowed_overlays)
@@ -270,6 +282,32 @@ def write_state(project_root: Path, state: ActivationState) -> Path:
         encoding="utf-8",
     )
     return path
+
+
+def suggestion_state_path(project_dir: Path, host: str = "claude") -> Path:
+    """Where a host hook records suggestions it has already shown (bug 040).
+
+    Repository-scoped: ``<git-common-dir>/jig/`` is shared by every worktree of
+    a clone, so a host that creates a fresh worktree per session still sees
+    each suggestion once. Outside git, the checkout's ``.jig/`` is used.
+    """
+
+    name = SUGGESTION_STATE_NAME.format(host=host)
+    requested = project_dir.resolve()
+    common_path = _git_common_dir(requested)
+    if common_path is not None:
+        return common_path / "jig" / name
+    return requested / ".jig" / name
+
+
+def _git_common_dir(requested: Path) -> Path | None:
+    common = _git_output(requested, ["rev-parse", "--git-common-dir"])
+    if not common:
+        return None
+    common_path = Path(common)
+    if not common_path.is_absolute():
+        common_path = (requested / common_path).resolve()
+    return common_path
 
 
 def _git_output(project_dir: Path, args: list[str]) -> str | None:
@@ -294,13 +332,10 @@ def _git_output(project_dir: Path, args: list[str]) -> str | None:
 def resolve_repo_root(project_dir: Path, *, per_worktree_indexing: bool = False) -> RepoRoot:
     requested = project_dir.resolve()
     worktree = _git_output(requested, ["rev-parse", "--show-toplevel"])
-    common = _git_output(requested, ["rev-parse", "--git-common-dir"])
+    common_path = _git_common_dir(requested)
     current_root = Path(worktree).resolve() if worktree else requested
     canonical = current_root
-    if common:
-        common_path = Path(common)
-        if not common_path.is_absolute():
-            common_path = (requested / common_path).resolve()
+    if common_path is not None:
         if common_path.name == ".git":
             canonical = common_path.parent.resolve()
     root_class = "canonical" if current_root == canonical else "worktree"
@@ -373,12 +408,18 @@ def _missing_provider_recommendation(provider: str | None = None) -> str:
     if provider:
         return (
             f"Configured semantic index provider '{provider}' is not installed. "
-            f"Install it or update {STATE_RELATIVE_PATH}; supported public "
-            f"candidates: {candidates}."
+            "The user can install it on the host from their own shell (not "
+            "from inside an agent session), or change the provider in "
+            f"{STATE_RELATIVE_PATH}; commit "
+            '"auto_attach": false there to stop this suggestion. Supported '
+            f"public candidates: {candidates}."
         )
     return (
-        "No supported semantic index provider is installed. Install one of "
-        f"{candidates}, then opt in through {STATE_RELATIVE_PATH}."
+        "No supported semantic index provider is installed. The user can "
+        f"install one of {candidates} on the host from their own shell (not "
+        f"from inside an agent session), then opt in through "
+        f'{STATE_RELATIVE_PATH}; commit "auto_attach": false there to stop '
+        "this suggestion."
     )
 
 
@@ -451,7 +492,18 @@ def activate(
         else builtin_registry(allow_internal_overlays=_scout_overlay_allowed(state))
     )
     provider, selection_error, provider_selection = _select_provider(state, registry)
-    if provider is None:
+    if state.opted_out:
+        result = ActivationResult(
+            provider=state.provider if state.provider_explicit else None,
+            provider_profile="unknown",
+            action="detect",
+            outcome="opted_out",
+            repo_root_class=roots.root_class,
+            considered_root=str(roots.selected),
+            auto_attach=False,
+            provider_selection=provider_selection,
+        )
+    elif provider is None:
         explicit_missing = (
             provider_selection == "explicit"
             and selection_error == "provider_missing"

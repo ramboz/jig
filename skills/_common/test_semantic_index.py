@@ -389,5 +389,71 @@ class CommandProviderTests(unittest.TestCase):
         self.assertEqual(outcome, "not_ready")
 
 
+class Bug040OptOutAndSuggestionScopeTests(unittest.TestCase):
+    def setUp(self):
+        self.tmpdir = Path(tempfile.mkdtemp(prefix="jig-bug-040-unit-"))
+
+    def tearDown(self):
+        shutil.rmtree(self.tmpdir, ignore_errors=True)
+
+    def _write_raw(self, raw):
+        path = self.tmpdir / ".jig" / "semantic-index.json"
+        path.parent.mkdir(parents=True, exist_ok=True)
+        path.write_text(json.dumps(raw))
+
+    def test_explicit_false_is_an_opt_out_but_absent_key_is_not(self):
+        self._write_raw({"auto_attach": False})
+        self.assertTrue(load_state(self.tmpdir).opted_out)
+        self._write_raw({})
+        self.assertFalse(load_state(self.tmpdir).opted_out)
+        self._write_raw({"auto_attach": "false"})
+        self.assertFalse(load_state(self.tmpdir).opted_out)
+
+    def test_opt_out_silences_missing_and_available_provider_recommendations(self):
+        for detected in (False, True):
+            self._write_raw({"auto_attach": False, "provider": "fake"})
+            provider = FakeProvider(detected=detected)
+            result = activate(
+                self.tmpdir, providers={"fake": provider}, emit_telemetry=False
+            )
+            self.assertEqual(result.action, "detect")
+            self.assertEqual(result.outcome, "opted_out")
+            self.assertIsNone(result.recommendation)
+            self.assertEqual(provider.ensure_calls, [])
+
+    def test_write_state_omits_auto_attach_unless_opted_out(self):
+        raw_path = write_state(self.tmpdir, ActivationState(provider="fake"))
+        self.assertNotIn("auto_attach", json.loads(raw_path.read_text()))
+        write_state(self.tmpdir, ActivationState(opted_out=True))
+        self.assertIs(json.loads(raw_path.read_text())["auto_attach"], False)
+        self.assertTrue(load_state(self.tmpdir).opted_out)
+
+    def test_suggestion_state_is_shared_by_linked_worktrees(self):
+        repo = self.tmpdir / "repo"
+        repo.mkdir()
+
+        def git(*args, cwd=repo):
+            subprocess.run(["git", *args], cwd=cwd, check=True, capture_output=True)
+
+        git("init", "-q", "-b", "main")
+        git("-c", "user.email=t@e", "-c", "user.name=t", "-c", "commit.gpgsign=false",
+            "commit", "-q", "--allow-empty", "--no-verify", "-m", "init")
+        git("worktree", "add", "-q", str(self.tmpdir / "wt"), "-b", "wt")
+
+        primary = semantic_index.suggestion_state_path(repo, "claude")
+        linked = semantic_index.suggestion_state_path(self.tmpdir / "wt", "claude")
+
+        self.assertEqual(primary, linked)
+        self.assertEqual(primary.name, "semantic-index-claude-hook.json")
+        self.assertEqual(primary.parent, (repo / ".git" / "jig").resolve())
+
+    def test_suggestion_state_outside_git_uses_checkout_jig_dir(self):
+        with mock.patch("semantic_index._git_output", return_value=None):
+            path = semantic_index.suggestion_state_path(self.tmpdir, "codex")
+        self.assertEqual(
+            path, self.tmpdir.resolve() / ".jig" / "semantic-index-codex-hook.json"
+        )
+
+
 if __name__ == "__main__":
     unittest.main()

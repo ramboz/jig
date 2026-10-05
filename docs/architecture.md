@@ -511,7 +511,7 @@ Jig is a workflow layer, not a data application (per [product-vision.md](product
 
 - `.jig/scaffold.json` — install manifest: which tiers chosen, when, by which jig version
 - `.jig/semantic-index.json` — project-local semantic-index opt-in state: auto-attach permission, provider preference, allowed overlays, and worktree policy
-- `.jig/semantic-index-events.jsonl` — content-free local activation telemetry written by the semantic-index helper; ignored by git alongside `.jig/semantic-index-claude-hook.json`, the Claude hook's one-time recommendation rate-limit file
+- `.jig/semantic-index-events.jsonl` — content-free local activation telemetry written by the semantic-index helper; ignored by git alongside `.jig/semantic-index-claude-hook.json`, the *legacy* per-checkout location of the hooks' one-time recommendation rate-limit file (still read; bug 040 moved new writes to the repository-scoped `<git-common-dir>/jig/semantic-index-<host>-hook.json` (`claude` on Claude Code and Copilot, `codex` on Codex) via `semantic_index.suggestion_state_path`, so per-session worktrees share it). An explicit `"auto_attach": false` in `.jig/semantic-index.json` is a committed opt-out that silences all suggestions
 - `.claude/skill-usage.jsonl` — append-only log written by `jig-telemetry.sh` (Task spawns; `event: task_spawned`, with optional `phase`/`spec`/`slice`) and `jig-skill-trace.sh` (Skill invocations; `event: skill_invoked`); read via [docs/skill-routing-verification.md](skill-routing-verification.md). Histogram consumer is `workflow.py routing-stats`
 - `docs/specs/**/spec.md` — the only project-level state jig owns; everything else lives in the dev's repo, owned by the dev
 

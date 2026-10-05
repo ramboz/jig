@@ -1588,6 +1588,13 @@ class SemanticIndexDigestTests(unittest.TestCase):
         import shutil
         shutil.rmtree(self._tmp, ignore_errors=True)
 
+    def test_activation_bucket_counts_opt_out_as_decline_not_failure(self):
+        # Bug 040: semantic_index.activate() emits outcome="opted_out".
+        self.assertEqual(
+            uu._activation_bucket({"action": "detect", "outcome": "opted_out"}),
+            "opted-out",
+        )
+
     def test_build_semantic_index_digest_buckets_and_proxies(self):
         rep = uu.build_semantic_index_digest(
             self.telemetry_log,
