@@ -1,8 +1,7 @@
 ---
-status: RECONCILED
+status: DONE
 dependencies: []
 last_verified: 2026-10-05
-claimed_by: sdd-adoption-review
 ---
 
 ## Slice 118-01 -- author-to-review
@@ -115,8 +114,8 @@ Subsequent edits are ceremony records, not runtime deliverables.
 
 ### Close-out (post-DONE)
 
-- [ ] Status board regenerated and checked.
-- [ ] Primer surfaces checked; no active-spec residue for this completed pilot.
+- [x] Status board regenerated and checked.
+- [x] Primer surfaces checked; no active-spec residue for this completed pilot.
 
 **Anti-horizontal-phasing check:** A spec author gets a complete optional
 contract-to-runtime-evidence-to-independent-review path in one slice.

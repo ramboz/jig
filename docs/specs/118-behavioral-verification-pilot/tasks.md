@@ -8,8 +8,8 @@
 - [x] Document proportional workflow and regenerate all host packages.
 - [x] Run full validation and fresh compliance/craft reviews.
 - [x] Record runtime evidence, deviation log, and reconciliation sweep.
-- [ ] Run reconciliation review and gated close-out.
-- [ ] Check status board/package drift and commit local deliverables.
+- [x] Run reconciliation review and gated close-out.
+- [x] Check status board/package drift and commit local deliverables.
 
 ## First paused close-out
 
@@ -42,5 +42,8 @@ The late runtime-manifest guard remains explicitly recorded as an AC8
 sequencing deviation for independent review, not retroactive test-first history.
 Compliance recovery and fresh craft review passed, with the AC8 sequencing
 exception explicitly recorded and independently accepted rather than claiming
-retroactive chronology. Reconciliation review and gated close-out remain pending.
+retroactive chronology. Independent reconciliation recovery then passed; the
+helpers advanced REVIEWED, RECONCILED, and DONE with the evidence gates enabled.
+The board was regenerated and audited, spec lint and three-host drift checks
+passed, and the evidence plus local close-out were committed.
 No push/merge/PR or evidence-gate bypass is authorized.
