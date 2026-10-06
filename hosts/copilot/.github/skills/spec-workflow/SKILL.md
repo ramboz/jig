@@ -316,6 +316,25 @@ SKILL.md hand-off is the documented gate.
    [ADR-0049](../../docs/decisions/adr-0049-design-fidelity-routing-to-originating-spec.md)
    for the full routing rationale; this step adds no new mechanism — teeth
    stay anchored to the existing `design_review` flag.
+5b. **Behavioral rules (optional, spec 118).** For stateful or role-dependent
+   work, use the slice template's table to name operation/control, actor,
+   state/precondition, outcome, rationale, and owning AC. Omit it when it adds
+   no value, or link an existing contract rather than creating a second source
+   of requirements. Rule IDs do not encode precedence; surface conflicts for
+   explicit resolution. A demo does not override the owning ACs. External
+   references, when used, name their authority and revision.
+5c. **Verification scenario (optional, spec 118).** When a user journey needs
+   runtime proof, use the template's preconditions, invocation, AC-linked
+   expected and observed outcomes, and preserved behavior. Reuse the existing
+   test command or project browser/service tools; jig owns neither execution
+   infrastructure nor credentials. Record actual per-step `pass` / `fail` /
+   `not-run` / `environment-error` outcomes, durable evidence references, and
+   the exercised code revision plus dirty-change identity when applicable.
+   Not-run/environment-error is not a pass: a required AC needing this evidence
+   remains unverified without it. Omit the section when existing tests suffice;
+   absence of an optional section alone is not a blocker. See
+   [worked-example-behavioral-verification.md](worked-example-behavioral-verification.md)
+   for a real CLI fixture and a read-only preservation check.
 6. **Ground your factual claims (spec 064-02 / ADR-0020 §1–§2).** Any
    load-bearing factual claim about a *runnable* surface — library/API
    capability, version/perf behavior, behavior of existing code — must be

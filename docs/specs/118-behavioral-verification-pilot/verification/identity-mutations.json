@@ -1,0 +1,10 @@
+{
+  "scope": "isolated copied runtime; repository source untouched",
+  "dependency": "skills/_common/use_cases.py",
+  "dependency_edit_changes_identity": true,
+  "before_identity": "runtime-sha256:fb26e69aba1c26e826883e041fe9d21f4b2bc006fc4764881e26f4ea36e3c6bc",
+  "after_identity": "runtime-sha256:0ca63ede561b69b35cfef8c596cab987be928a98359174e6fe7b77f75522059f",
+  "scenario_after_dependency_edit": "pass",
+  "constant_digest_mutant_test_exit": 1,
+  "constant_digest_mutant_detected": true
+}

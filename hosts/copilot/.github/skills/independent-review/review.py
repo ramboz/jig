@@ -372,6 +372,23 @@ def _practices_check_block() -> str:
 # -------- Test-quality snapshot (slice 043-04) --------
 
 
+def _behavioral_verification_check_block() -> str:
+    """Compliance-only judgment on optional contracts and runtime evidence."""
+    return """\
+- **Behavioral verification (when supplied)**: optional-section absence alone
+  is not a blocker. For supplied behavioral rules or verification scenarios,
+  check alignment with the owning ACs, actor/state outcomes, negative paths,
+  and preserved behavior. IDs are trace links, not precedence; a demo is not
+  authority to override an AC. Surface unresolved reference/rule conflicts.
+  For runtime claims, compare expected and observed results per step, inspect
+  evidence references and the exercised code revision plus dirty-change
+  identity, and confirm applicability to the deliverable under review.
+  `not-run` or `environment-error` is not a pass. If a required AC needs
+  runtime proof and evidence is absent/unavailable, report it as unverified;
+  do not demand a new runner or an optional scenario when existing tests suffice.
+"""
+
+
 # Default base branch for the merge-base computation. Hardcoded to `main`
 # because it's jig's convention and the snapshot is best-effort — a
 # project on a different default branch falls back to the graceful
@@ -626,6 +643,7 @@ def build_implementation_prompt(spec_path: Path, slice_label: str,
     # gaps (task completeness, approach alignment, ADR signal, tech-debt
     # tracking) are universal across slices.
     post_snapshot_check += "\n" + _practices_check_block()
+    post_snapshot_check += "\n" + _behavioral_verification_check_block()
     return f"""{_PREAMBLE}
 
 ## Your job

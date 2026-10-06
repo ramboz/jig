@@ -26,6 +26,19 @@ All non-trivial specs are SPIDR-split before implementation:
 **Anti-horizontal-phasing rule:** every slice must touch the user-facing layer
 and deliver end-to-end value.
 
+## Behavioral contracts and runtime evidence
+
+Use the slice template's optional **behavioral rules** for state/role-dependent
+outcomes and **verification scenario** when a journey needs runtime proof.
+Link rules/steps to owning ACs and record preserved behavior, setup/invocation,
+expected and observed outcomes, per-step results, durable evidence references,
+and tested revision plus any dirty-change identity. Reuse existing contracts
+and test/browser/service tools; existing tests may suffice.
+
+These sections are not new gates. Absence alone is not a blocker, but unavailable
+execution is not a pass for an AC requiring runtime evidence. Rule IDs are not
+precedence; demos do not override ACs. Surface reference conflicts explicitly.
+
 ## Session workflow
 
 1. Read the automatic `jig hint:` orientation injected at `SessionStart`, or run

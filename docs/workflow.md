@@ -35,8 +35,8 @@ about the corpus — never the unauthorized-record-amendment case.
 
 ## Host packages (`hosts/`) — regenerate, never hand-edit
 
-The repository root is canonical source; the committed `hosts/claude/` and
-`hosts/codex/` trees are **generated** runtime install payloads. They are
+The repository root is canonical source; the committed `hosts/claude/`,
+`hosts/codex/`, and `hosts/copilot/` trees are **generated** runtime install payloads. They are
 checked in so a remote `marketplace add` resolves a clean package, but they are
 derived artifacts — never hand-edit a file under `hosts/`.
 
@@ -44,14 +44,14 @@ The loop when you change source (a skill, hook, agent, manifest, template — or
 bump a version in a `*-plugin/plugin.json` manifest):
 
 1. **Edit source** at the repo root (not under `hosts/`).
-2. **Regenerate both packages:** `python3 scripts/build_host_packages.py`
+2. **Regenerate all three packages:** `python3 scripts/build_host_packages.py`
 3. **Commit `hosts/`** alongside the source change (`git add hosts/`).
 
 CI runs the **drift guard** (`python3 scripts/build_host_packages.py --check`)
 on every PR: it regenerates into a scratch dir and diffs against the committed
 `hosts/` tree, failing — and naming the stale path plus the regenerate command
 — when source was edited without rebuilding. So a forgotten rebuild (including a
-release version bump that must reflect into both packages) cannot merge
+release version bump that must reflect into all three packages) cannot merge
 silently.
 
 ## Routing: spec-shaped vs bug-shaped work
@@ -316,6 +316,23 @@ All specs are SPIDR-split before implementation begins:
 - **R — Rules**: split by business rules (simple first, edge cases later).
 
 **Anti-horizontal-phasing guardrail**: every slice must touch the user-facing layer and deliver end-to-end value. A slice that only touches the DB is horizontal phasing.
+
+## Behavioral contracts and runtime evidence
+
+The slice template offers optional **behavioral rules** for state/role-dependent
+outcomes and a **verification scenario** for journeys needing runtime proof.
+Link rows and steps to their owning ACs, name behavior that must be preserved,
+and record actual observations, per-step outcomes, and the tested revision plus
+any dirty-change identity. Reuse existing contracts and project test tools.
+
+These are authoring/review aids, not new gates or mandatory artifacts. Existing
+tests may suffice. The compliance reviewer checks supplied evidence; an
+unavailable environment is not a pass for an AC requiring runtime proof.
+Rule IDs do not establish precedence, and a demo never silently overrides ACs.
+External references name authority and revision; contradictions are surfaced
+for explicit resolution. The existing `design_review` attestation rail is unchanged.
+
+See the [runnable CLI example](../skills/spec-workflow/worked-example-behavioral-verification.md).
 
 ## Session workflow
 
