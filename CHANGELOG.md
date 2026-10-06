@@ -1,5 +1,17 @@
 # Changelog
 
+## [2.17.0](https://github.com/ramboz/jig/compare/v2.16.2...v2.17.0) (2026-10-06)
+
+
+### Features
+
+* **spec-workflow:** add behavioral rules and runtime verification ([#241](https://github.com/ramboz/jig/issues/241)) ([e3fb128](https://github.com/ramboz/jig/commit/e3fb1283a75131e4bc80e3aaf0bd019389d5a3df))
+
+
+### Documentation
+
+* **specs:** reserve 117-decision-rulings-in-context ([e6112bf](https://github.com/ramboz/jig/commit/e6112bfcf05683c5f3d1c959f53967c4cf0966c9))
+
 ## [2.16.2](https://github.com/ramboz/jig/compare/v2.16.1...v2.16.2) (2026-10-05)
 
 
