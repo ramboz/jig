@@ -1,0 +1,44 @@
+{
+  "code_revision": "7a04ff595769a86bcb51ba3dc5bd96c1969ff971",
+  "dirty_change_identity": "runtime-sha256:fb26e69aba1c26e826883e041fe9d21f4b2bc006fc4764881e26f4ea36e3c6bc",
+  "runtime_manifest": {
+    "skills/spec-workflow/workflow.py": "e8be31a9b9ce8d1c9da6c72074cf8348e36492cdec403dd7c99929e2939a5460",
+    "skills/_common/atomic_io.py": "726c4b37214e482d13df719c3e12345b53ba389b8631a0fbc742d9f69538c7f8",
+    "skills/_common/candidate_sidecar.py": "fd187a5d19897d2e52e0a8438a360faf502479249a633ca5e8e880b3dc11cd2c",
+    "skills/_common/claim_ref.py": "ecfdfb0843bfc638a9d0561428b7a20cef28980c33c137c6dfbaf232bdb40888",
+    "skills/_common/cross_ref_state.py": "228a734b9e664f5256a72a7fed3b90a2601d5b84ad838434321f55ae484719c4",
+    "skills/_common/derived_docs.py": "4751ef234af957ed4ab3a036714f1ee41b17f51d8c180d2aad54c8fae8394a00",
+    "skills/_common/gate_telemetry.py": "dcc8b9af35a4c0a2517400d15a3b3235bad1d7e661fc13e085c0d2ec685e9074",
+    "skills/_common/lexicon.py": "282953f15d6a1756c37c0b1045cc66deefc1a3a54a30140f322d9e93e31c1772",
+    "skills/_common/parsing.py": "f75b12242e338e188c32c4bac9ef10b8393f36895136e5b497de8a2e776af6ad",
+    "skills/_common/project_layout.py": "3cb10e9dcb541f7b322479d4de0ad85b6743e40b737c0cd969c5657741346ef2",
+    "skills/_common/reservation.py": "6644527cc58bb603d3b18f3ca76a091865e0e43e08fbbade6fb4e2ce6c978b95",
+    "skills/_common/review_config.py": "f8f82566f7bea790726a56603270ef2d126951675b2c42cb790cb73ace379f0d",
+    "skills/_common/review_evidence.py": "17d290bcb6483c8e6d9b7187eed9c5b4a97458298c8e01f6ae8430cdb33d3958",
+    "skills/_common/scaffold_state.py": "7c749bc2e46a7b21f6f32c7cbb1bbac9842c62dd45bdbc72d38b8a54feac2556",
+    "skills/_common/semantic_index.py": "746da7d93c5995f814c4a5cdebcf391258ce555bea4052d05087bcf273544168",
+    "skills/_common/skill_discovery.py": "33ab80b0086169060f1fb5ce101837ab82d777b0285238acbdf67eaa937909a0",
+    "skills/_common/subtree.py": "2056c8c63e044edee367daca97cc4b2cde28fd74b2c1615d44b6fe9eb2c718a7",
+    "skills/_common/team_signal.py": "feb18464ea8ea98a9933c0c6bed85b6cf7f01938dcf563d65970b913df4795d0",
+    "skills/_common/use_cases.py": "25870d9feaf87ca8d3ed1604bb8f76e6aeaa232d580ca3703900a31373cd2692"
+  },
+  "python_version": "3.14.0 (main, Oct  7 2025, 09:34:52) [Clang 17.0.0 (clang-1700.3.19.1)]",
+  "coverage": "fixture CLI, not live host hooks",
+  "steps": [
+    {
+      "step": 1,
+      "ac": "AC-1",
+      "outcome": "pass",
+      "observed": "# Use-case progress\n\nAdvisory, read-only. Counts are done/known slices (deferred and abandoned slices are not known work). A progress view, not a check that the work is on-goal.\n\nUC-1  A developer can inspect progress  \u2014  1/2 slices done\n  001-example  IN_PROGRESS  1/2\n\nUnanchored (cites no resolvable use case)  \u2014  none\n\nSummary: 1 use case(s) \u00b7 1 spec(s) \u00b7 0 unanchored \u00b7 1/2 slices done (each spec and slice counted once)\n",
+      "exit_code": 0,
+      "stderr": ""
+    },
+    {
+      "step": 2,
+      "ac": "AC-2",
+      "outcome": "pass",
+      "observed": "Compared fixture file paths and bytes before/after",
+      "unchanged": true
+    }
+  ]
+}

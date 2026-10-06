@@ -1,7 +1,7 @@
 ---
-status: IN_PROGRESS
+status: RECONCILED
 dependencies: []
-last_verified:
+last_verified: 2026-10-05
 claimed_by: sdd-adoption-review
 ---
 
@@ -14,8 +14,10 @@ checkable observations without adding ceremony to unrelated slices.
 **DoR:**
 - Existing slice template, clarify taxonomy, and compliance prompt inspected.
 - Owner approved the bounded pilot and implementation through jig's ceremony.
-- Work stays in this worktree; Git network transports are disabled for lifecycle
-  commands because remote access was not authorized.
+- Work stays in this worktree. The owner authorized network prechecks and
+  explicitly selected complete local ceremony authorization on 2026-10-05.
+  No push, merge, PR, or gate bypass is authorized. The owner separately approved
+  a test-process-only bare-fixture setting; persistent Git settings stay unchanged.
 
 **Acceptance Criteria:**
 
@@ -73,35 +75,43 @@ checkable observations without adding ceremony to unrelated slices.
 
 ### Verification scenario
 
-**Preconditions:** Python 3, repository helpers, isolated fixture under the
-session artifacts directory, no remote access or production credentials.
+**Preconditions:** Python 3, Git, repository helpers, and a helper-owned temporary
+fixture. The scenario uses no remote access or production credentials.
 
 **Invocation:** Follow the packaged worked example; run targeted source tests
 and `python3 scripts/build_host_packages.py --check`.
 
 | Step | AC | Expected observation | Observed | Outcome | Evidence |
 |------|----|----------------------|----------|---------|----------|
-| 1 | 7 | Real progress CLI reports fixture counts | Pending | not-run | Pending |
-| 2 | 7 | Fixture bytes unchanged after CLI execution | Pending | not-run | Pending |
-| 3 | 1-6, 8 | Targeted tests exercise authoring and generated prompts | Pending | not-run | Pending |
-| 4 | 9 | All three committed packages match generated source | Pending | not-run | Pending |
+| 1 | 7 | Real progress CLI reports fixture counts | UC-1 reports `1/2 slices done`; CLI exits 0 | pass | [scenario.json](verification/scenario.json), step 1 |
+| 2 | 7 | Fixture bytes unchanged after CLI execution | File paths and bytes compare equal (`unchanged: true`) | pass | [scenario.json](verification/scenario.json), step 2 |
+| 3 | 1-6, 8 | Targeted tests exercise authoring and generated prompts | All 347 selected tests pass, including the executed example | pass | [checks](verification/checks.md), [TDD excerpts](verification/tdd.txt) |
+| 4 | 9 | All three committed packages match generated source | `build_host_packages.py --check` exits 0 | pass | [checks](verification/checks.md) |
+| 5 | 9 | Repository suite and type-check gate pass | Approved fixture-compatible run: 5065 tests, `OK (skipped=8)`, pyright clean, exit 0 | pass | [checks](verification/checks.md) |
 
 **Preserved behavior:** progress stays read-only, legacy slices need no new
 fields/sections, and design attestation is unchanged.
 
-**Code revision / dirty-change identity:** Record the implementation commit and
-any subsequent diff with the observations before closing this slice.
+**Code revision / dirty-change identity:** Implementation
+`7a04ff595769a86bcb51ba3dc5bd96c1969ff971`; runtime sources unchanged at execution.
+[scenario.json](verification/scenario.json) records the per-file runtime manifest
+and `runtime-sha256:fb26e69aba1c26e826883e041fe9d21f4b2bc006fc4764881e26f4ea36e3c6bc`.
+Subsequent edits are ceremony records, not runtime deliverables.
 
 **DoD:**
-- [ ] All ACs pass; full test suite green (no regressions).
-- [ ] Implementer tests exercise each executable/surface AC meaningfully.
-- [ ] New tests witnessed red before implementation and green afterward.
-- [ ] Reviewed by a fresh read-only reviewer using `review.py`.
-- [ ] Implementation review passed.
-- [ ] Deviation log produced under this slice heading.
-- [ ] Reconciliation sweep produced under this slice heading.
-- [ ] Reconciliation review passed.
-- [ ] Deferred decisions assessed; any real follow-up recorded proportionally.
+- [x] Functional ACs pass; the narrow AC8 sequencing deviation is explicitly
+      recorded and independently accepted; full test suite green.
+- [x] Implementer tests exercise each executable/surface AC meaningfully.
+- [x] Original planned behavior witnessed red before implementation and green
+      afterward; the late supplemental guard's sequencing exception is recorded,
+      without claiming retroactive chronology.
+- [x] Reviewed by fresh read-only reviewers using `review.py`.
+- [x] Implementation review passed.
+- [x] Deviation log produced under this slice heading.
+- [x] Reconciliation sweep produced under this slice heading.
+- [x] Reconciliation review passed.
+- [x] Deferred decisions assessed; no new load-bearing decision or separate
+      feature was deferred by this bounded pilot.
 
 ### Close-out (post-DONE)
 
@@ -113,7 +123,7 @@ contract-to-runtime-evidence-to-independent-review path in one slice.
 
 ### Deviation log (after reconciliation)
 
-Implementation notes so far; reconciliation is not complete:
+Implementation and review history:
 
 1. **Execution ownership.** The implementer agent refused the initial
    IN_PROGRESS handoff because its contract requires READY_FOR_IMPLEMENTATION.
@@ -131,29 +141,88 @@ Implementation notes so far; reconciliation is not complete:
    runtime sources as well as `workflow.py`, rather than missing dirty
    dependency edits. The example explicitly requires the Git executable (not
    a Git checkout), and its executable test independently recomputes the
-   expected manifest and digest. The latest scenario test has not been run:
-   its execution remains blocked.
+   expected manifest and digest. At the first pause the updated scenario test
+   had not run; it subsequently passed in the authorized 347-test selection.
 4. **Permission boundary.** Remote fetching, a manual readiness-review file,
    direct scenario execution/evidence, and a Git file-protocol override were
    denied. No override was applied. Local lifecycle transitions ran with all
    Git transports blocked, reporting unavailable remote freshness honestly.
    The number is provisional; no push, PR, merge, or remote reservation occurred.
-5. **Closure remains blocked.** The full suite was stopped to honor the denied
+5. **First paused close-out.** The full suite was stopped to honor the denied
    scenario execution. Per-step observations above remain not-run and no
    gated review verdicts are recorded. The existing evidence gates stay armed;
-   IN_PROGRESS is intentional until authorized verification and reconciliation.
+   IN_PROGRESS was retained until authorized verification and reconciliation.
+6. **Authorized resumption (2026-10-05).** The owner explicitly selected complete
+   local ceremony authorization. Fresh remote prechecks succeeded; `origin/main`
+   had zero commits absent from this branch. The actual CLI and preservation
+   scenario now have passing recorded outcomes, and all 347 targeted tests pass.
+   Package drift, spec lint, and board audit passed. The full suite executed
+   5065 tests in 501.756s with 5 failures, 26 errors, and 8 skips; pyright passed.
+   A temporary bare-repository probe reproduced the inherited command-line
+   `safe.bareRepository=explicit` restriction (`git config` exits 128).
+   That initial run's result remains recorded, not erased.
+7. **Recovered validation.** The owner then approved the test-process-only
+   `safe.bareRepository=all` setting with "Do it". The runner appended only that
+   entry to its copied environment; no persistent setting or file-protocol
+   policy changed, and the parent still reports `explicit`. All 56 previously
+   failing fixture selectors passed, followed by the complete 5065-test suite
+   (`OK`, 8 skipped) and clean pyright. After permissions were relaxed, an
+   isolated copied-runtime sensitivity check also passed: a dependency edit
+   changed the identity, while a constant-digest mutant was rejected by the
+   existing assertion. Repository source was untouched.
+8. **AC8 sequencing exception.** The supplemental runtime-manifest guard was
+   added after its implementation, unlike the original planned behavior's
+   red/green loops. The orchestrator accepts this as a narrow, recorded process
+   deviation for independent review/reconciliation, backed by actual independent
+   assertions and mutant rejection. No pre-implementation chronology is claimed
+   for it, no original AC is rewritten, and no functional requirement or future
+   test-first policy is weakened.
+9. **Compliance recovery.** The fresh reviewer initially recorded needs-changes
+   for the full-suite failure and the late test chronology. The initial verdict
+   is preserved in `verification/compliance-initial.md`. After the passing full
+   suite, independent mutant evidence, and explicit deviation disposition, the
+   same reviewer accepted the narrow historical process exception and returned
+   pass, without claiming test-first chronology for the late guard.
+10. **Craft review.** A fresh craft reviewer returned pass with no blockers.
+    Its claimed manifest omission was checked against the actual JSON: all
+    three named modules are present, and an independent audit matches all 19
+    runtime files and the aggregate identity. No refresh is needed. The
+    section-localization observation is accepted as nonblocking: current
+    authoring steps remain on the correct hot path, and no required behavior or
+    test is removed. Real CLI preservation and independent digest assertions
+    are retained as strengths.
+11. **Scope and leanness.** No new gate, runner, skill, schema, authentication
+    mechanism, architectural boundary, or persistent Git setting was added.
+    Conventions, accepted ADRs, closed records, and existing design attestation
+    remain untouched. Memory-sync judgment identified no additional settled
+    domain decision worth persisting; no unrelated memory inventory was run.
+12. **Reconciliation sweep recovery.** The independent reconciliation reviewer
+    requested explicit dispositions for this spec's records, the canonical test
+    and worked example, the root README, and the ADR index. The grouped sweep
+    below now names each canonical artifact and gives a checked rationale;
+    no implementation expansion or unrelated document correction was needed.
+    A fresh, focused recovery reviewer returned pass with the accounting issue
+    resolved. The original non-clearing verdict is preserved in
+    `verification/reconciliation-initial.md`; the recovery verdict is recorded
+    via the helper before any terminal state is entered.
 
 ### Reconciliation sweep
 
-Provisional sweep; not a reconciliation verdict:
+Checked dispositions before the independent reconciliation review:
 
 | Artifact | Disposition | Rationale |
 |----------|-------------|-----------|
-| Source template and authoring/clarify/compliance surfaces | updated | Optional rule/scenario guidance and compliance-only review nudge; no new gate or schema. |
-| `docs/workflow.md` and workflow template | updated | Proportional usage documented; source package guidance names all three hosts. |
+| `templates/docs/specs/slice-template.md`; `skills/spec-workflow/SKILL.md`; `skills/clarify/SKILL.md`; `skills/independent-review/review.py` | updated | Optional rule/scenario guidance and compliance-only review nudge; no new gate or schema. |
+| `skills/spec-workflow/test_behavioral_verification.py`; `skills/spec-workflow/worked-example-behavioral-verification.md` | updated | New canonical regression coverage and executable example shipped; current bytes match the tested implementation revision. |
+| `docs/specs/118-behavioral-verification-pilot/{spec.md,plan.md,tasks.md,slice-01-author-to-review.md}` | updated | The new spec/plan define the bounded pilot; tasks and slice record track observed implementation, validation, exceptions, and lifecycle progress without rewriting the ACs. |
+| `docs/workflow.md`; `templates/docs/workflow.md.template` | updated | Proportional usage documented; source package guidance names all three hosts. |
+| Root `README.md` | no-op | Front-door workflow and existing skill/install surface remain accurate for this optional extension; no new skill, tier, installation path, or required artifact was introduced. Unrelated old wording is outside this slice. |
 | `hosts/` | updated | Generated from canonical source, never hand-edited. |
-| `docs/specs/README.md` | updated | Regenerated for this open local slice; must be checked again before integration. |
+| `docs/specs/README.md` | updated | Regenerated from the open slice record; regenerate and audit again after gated closure. |
 | Vision, architecture, conventions, accepted ADRs, closed specs | no-op | No product/module-boundary change or record amendment; conventions were not edited. |
+| `docs/decisions/README.md` (ADR index) | no-op | No new or superseding ADR was created; the pilot adds no load-bearing architecture choice requiring an index entry. |
 | Primer surfaces | no-op | No new skill or active-spec entry introduced; closure has no new primer residue to remove. |
 | Memory, inbox, refinement queue | no-op | No settled new decision or unrelated follow-up recorded; memory status checks were outside the requested scope. |
-| Runtime evidence and gated review records | deferred | Owner authorization is required after the denied writes/execution; no pass is inferred. |
+| This spec's `verification/` records | updated | Actual CLI outcomes, runtime manifest, TDD excerpts, passing full-suite result, original environment failure, and isolated mutant observations recorded honestly. |
+| This spec's `reviews/` records | updated | Genuine compliance, craft, and reconciliation recovery verdicts recorded via the helper; original non-clearing snapshots retained in `verification/`. |
+| Gated terminal transition and post-DONE checks | deferred | Follow the independently cleared reconciliation with real RECONCILED/DONE transitions, board audit, and local commits; these future actions are not pre-ticked. |

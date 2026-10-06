@@ -349,7 +349,7 @@
 | [116-use-case-progress-report](116-use-case-progress-report/spec.md) | 116-01 — progress-rollup | **DONE** |  |
 | [116-use-case-progress-report](116-use-case-progress-report/spec.md) | 116-02 — orient-surface | **DONE** |  |
 | [117-decision-rulings-in-context](117-decision-rulings-in-context/spec.md) | 117-01 — tbd | DRAFT |  |
-| [118-behavioral-verification-pilot](118-behavioral-verification-pilot/spec.md) | 118-01 -- author-to-review | IN_PROGRESS (sdd-adoption-review) |  |
+| [118-behavioral-verification-pilot](118-behavioral-verification-pilot/spec.md) | 118-01 -- author-to-review | RECONCILED (sdd-adoption-review) |  |
 
 ## Deferred slices
 
@@ -393,7 +393,7 @@ Advisory (ADR-0040 auditability — never blocks). Regenerated from `reviews/sli
 
 - **0** pass(es) recorded `not-shown` (selection step did not run — the kill-criterion-1 defect signal).
 - **25** pass(es) recorded `non-interactive` (declared no-orchestrator / CI).
-- **13** shown-and-declined anomaly(ies) (a high-confidence richer skill was shown and not applied):
+- **14** shown-and-declined anomaly(ies) (a high-confidence richer skill was shown and not applied):
   - `088-project-orientation/slice-02-arch.md` — applied `none`; declined: arch-review
   - `088-project-orientation/slice-02-craft.md` — applied `none`; declined: arch-review, independent-review, pr-review, scout-pr-review
   - `113-copilot-third-host/slice-02-arch.md` — applied `none`; declined: arch-review
@@ -407,3 +407,4 @@ Advisory (ADR-0040 auditability — never blocks). Regenerated from `reviews/sli
   - `113-copilot-third-host/slice-09-craft.md` — applied `unknown`; declined: arch-review, independent-review, pr-review, scout-pr-review
   - `116-use-case-progress-report/slice-01-craft.md` — applied `pr-review`; declined: arch-review, independent-review, scout-pr-review
   - `116-use-case-progress-report/slice-02-craft.md` — applied `pr-review`; declined: arch-review, independent-review, scout-pr-review
+  - `118-behavioral-verification-pilot/slice-01-craft.md` — applied `pr-review`; declined: arch-review, independent-review, scout-pr-review
