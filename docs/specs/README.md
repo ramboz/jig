@@ -350,6 +350,9 @@
 | [116-use-case-progress-report](116-use-case-progress-report/spec.md) | 116-02 — orient-surface | **DONE** |  |
 | [117-decision-rulings-in-context](117-decision-rulings-in-context/spec.md) | 117-01 — tbd | DRAFT |  |
 | [118-behavioral-verification-pilot](118-behavioral-verification-pilot/spec.md) | 118-01 -- author-to-review | **DONE** |  |
+| [119-mixed-design-evidence-attestation](119-mixed-design-evidence-attestation/spec.md) | 119-01 — attest-rich-policy | DRAFT |  |
+| [119-mixed-design-evidence-attestation](119-mixed-design-evidence-attestation/spec.md) | 119-02 — reject-stale-delivery | DRAFT |  |
+| [119-mixed-design-evidence-attestation](119-mixed-design-evidence-attestation/spec.md) | 119-03 — legacy-and-opt-in | DRAFT |  |
 
 ## Deferred slices
 
