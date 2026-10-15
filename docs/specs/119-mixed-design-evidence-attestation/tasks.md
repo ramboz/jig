@@ -5,20 +5,27 @@ Authoring review evidence is in the ADR and slice `reviews/` directories.
 
 ## Before readiness
 
-- [ ] Parent aligns durable Vellum/Servo proposal links and contract versions.
+- [ ] Parent aligns durable Vellum/Servo proposal links, installed overall verdict
+  authority, separate version namespaces and subordinate run/digest references.
 - [ ] Approve source/target approval and policy/config binding semantics.
 - [ ] Define app input closure, dirty-input digest and independently observed
-  delivered-build identity.
+  delivered-build identity with exact C0 serialization/digest domains/test
+  vectors and explicit required matrix; approve concrete tolerance/transport.
 - [ ] Select existing-artifact identity encoding and read-only reuse checks.
-- [ ] Preserve genuine pilot captures and a supported legacy sample.
+- [ ] Define producer capture/renewal protocol and C1 approved-source checkpoint;
+  preserve genuine captures and prove runtime binding during implementation.
+- [ ] Owner accepts the intentional new-legacy-attestation provenance cost,
+  with historical/unflagged/default behavior unchanged.
 - [ ] Obtain later-phase ADR acceptance and readiness review authority.
 
 ## 119-01 — rich verdict through completion
 
-- [ ] Write failing rich-policy/required-failure/incomplete-evidence tests.
-- [ ] Consume producer-owned policy/outcomes and bind evidence in the prompt
-  and existing recorded attestation path.
-- [ ] Exercise genuine passing and high-composite required-failure runs through
+- [ ] Write failing overall-authority/required-failure/incomplete-evidence and
+  deterministic-component-pass/overall-quality-fail tests.
+- [ ] Consume authoritative installed overall-gate policy/outcomes and subordinate
+  run/digest-bound design evidence in the existing prompt/attestation path.
+- [ ] Produce genuine passing, required-failure and component-pass/quality-fail
+  overall/component captures; prove served-build binding, then exercise
   independent review, recording, existing review checks and completion.
 - [ ] Document, validate, review, reconcile and close the vertical slice.
 

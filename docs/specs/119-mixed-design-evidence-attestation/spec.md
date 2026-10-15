@@ -21,8 +21,9 @@ use_cases: [UC-4, UC-7, UC-20]
 A developer opting into `design_review` should be able to complete a slice from
 fresh, externally produced design evidence, and should get a clear refusal
 when a required condition failed or the evidence belongs to a different app.
-Jig will attest the producer's policy verdict and recorded bindings rather
-than infer mixed-policy success from an average score.
+Jig will attest the installed producer gate's overall policy verdict and
+recorded bindings rather than infer mixed-policy success from an average
+score or a successful design component.
 
 The main tradeoff is evidence discipline: runs need a link to the approved
 design input, frozen policy/config and actual delivered implementation.
@@ -51,7 +52,8 @@ evidence consumer, not a second owner for a reported tracked defect.
 
 Vellum owns grounding, source snapshots and approval of the design-input
 contract. Servo owns implementation observation, evaluation policy, required
-conditions, scoring/judgment and the result envelope. Jig owns independent
+conditions, scoring/judgment, the installed overall gate-payload and subordinate
+design component envelope. Jig owns independent
 delivery review and attestation. Interface labels below describe semantic
 requirements, not proposed JSON keys or a second producer schema.
 
@@ -65,27 +67,54 @@ are outside this spec. Closed records and `docs/conventions.md` stay untouched.
 
 ### Revised attestation predicate
 
-For an explicitly selected, supported rich producer contract:
+For an explicitly selected, supported installed overall gate policy:
 
 ```text
 attest_pass =
-  readable_supported_pinned_contract
+  readable_supported_pinned_installed_gate_and_contracts
   AND identified_completed_honest_run
   AND approved_source_and_target_match
   AND frozen_effective_policy_and_config_match
   AND evaluated_implementation_equals_current_delivery
-  AND explicit_producer_policy_verdict_is_pass
+  AND installed_overall_gate_payload_policy_verdict_is_pass
+  AND subordinate_design_evidence_matches_gate_run_and_content_digest
   AND every_policy_required_condition_is_present_and_conclusive_pass
   AND preserved_records_are_consistent
 ```
 
-The required inventory comes from the pinned producer policy, not from
+**Verdict authority is the installed overall gate-payload under its pinned
+effective policy**, including required evidence and quality. Servo 036's
+design-evidence-envelope `pass` says the deterministic design component
+succeeded; it does not assert Servo 035's overall gate passed. The component
+evidence is subordinate support, referenced by run identity and content digest
+from the preserved overall gate record. Matching a component's bytes to a
+different gate run, or promoting its success to the overall verdict, is
+non-clearing. A genuine run where the deterministic component passes but the
+quality result fails must leave completion blocked.
+
+The required inventory comes from the pinned installed producer policy, not from
 whichever rows happen to appear in a result. Unknown outcomes, required
 not-run/inconclusive/environment-error, missing rows, mismatched identities,
-unsupported versions or a policy-pass contradicting a required failure
+unsupported versions or an overall policy-pass contradicting a required or
+quality failure
 cannot clear. Composite and threshold can be quoted as supporting evidence;
 they are not a sufficient rich-policy predicate. Optional outcomes remain
 governed by the producer's policy, not a new Jig veto.
+
+Pin each version namespace separately; neither a bare "v1/v2" label nor missing
+fields selects a contract:
+
+| Namespace | Owner and authority | Reported proposal, not an accepted interface |
+|-----------|---------------------|---------------------------------------------|
+| Approved design-input contract | Vellum; source facts, approval, constraints and mapping | Revision to align under Vellum 013. |
+| Design-evidence-envelope | Servo 036; deterministic component observations/outcome | Component envelope v1; `pass` means this component succeeded. |
+| Installed overall gate-payload | Servo 035; authoritative installed-policy verdict including quality | Opt-in schema v2 proposed; default gate-payload v1/exit 0/1/2 retained. |
+| Design-eval configuration, when used | Servo design-eval; frozen quality/judge definition | Pin its own supported configuration revision independently. |
+
+Shared checkpoint C0 sets supported combinations and run/digest references,
+not a competing Jig producer schema. The reviewer reads the
+preserved overall result; it does not invoke an installed gate or recompute
+its quality/required-condition combination.
 
 The reviewer reads preserved artifacts and records its references, reasons
 and identity comparisons at the existing design-review verdict path. At
@@ -97,13 +126,18 @@ attestation, not a new lifecycle gate.
 
 ### Identity and trust requirements
 
-The producer/build-owner must define canonical input closure and digest rules.
+The producer/build-owner defines exact input serialization, namespaced versions,
+digest domains/test vectors, explicit required matrix and canonical
+current/served/delivered-build closure predicates at shared contract checkpoint
+C0. Genuine proof that the
+observer evaluated the served build is required during implementation, not
+assumed from that definition or demanded before the integration can start.
 Jig must explicitly validate all three comparisons:
 
 | Binding | Required comparison |
 |---------|---------------------|
 | Approved design | Vellum source snapshot, approved target/contract revision and content identity in the run versus the currently approved target reference. |
-| Eval definition | Run's effective policy/config identity versus the frozen approved policy/config, including required inventory, threshold/aggregation rules and judge settings when applicable. |
+| Eval definition | Installed overall gate/effective policy and separately pinned input/envelope/gate-payload/design-eval revisions in the run versus the approved configuration, including required inventory, threshold/aggregation rules and judge settings when applicable. |
 | Implementation/delivery | Run's source revision and dirty-input digest, effective build/runtime inputs/config/assets/dependencies and evaluated/served build identity versus the current build-owner delivery record and referenced bytes. |
 
 The current delivery reference must be independent of the result being
@@ -114,8 +148,9 @@ commit can preserve the application identities when the declared input
 closure supports that conclusion. Unknown input closure, inaccessible
 artifacts or no credible served-build binding leaves the requirement unmet.
 
-Preserve the run ID, producer contract revision, referenced paths/digests and
-comparison results in the attestation. Exact evidence-record encoding is
+Preserve the overall gate run ID, separately named contract revisions,
+subordinate design evidence run/digest references, referenced paths/digests
+and comparison results in the attestation. Exact evidence-record encoding is
 aligned with the producer before implementation, within existing review
 artifact conventions rather than new slice frontmatter fields.
 
@@ -134,21 +169,46 @@ explicit pinned external contract variant:
   select a scalar fallback.
 - An explicitly legacy, threshold-only policy retains its original
   higher-is-better composite/own-threshold semantics plus honest execution
-  and the same source/config/build binding. It cannot discharge a slice that
+  and the same source/config/build binding. Its selected verdict is authoritative
+  for the installed threshold-only policy, not a component of a larger gate.
+  Component-envelope v1 alone is not evidence of legacy gate-payload v1.
+  It cannot discharge a slice that
   requires richer mandatory outcomes. Old evidence lacking binding is
   non-clearing for a new delivery until the producer renews it.
 - Unsupported/ambiguous contract identity and contradictory records are
   non-clearing with an actionable reason. No automatic migration or Jig-owned
   producer-format adapter is assumed.
 
+**Intentional compatibility cost for owner decision:** newly requested legacy
+attestations need appropriate delivery provenance and may require renewed
+producer evidence. Historical/unflagged behavior stays untouched, with no
+default migration. The owner must accept this cost before ADR acceptance;
+absence of provenance must not silently weaken a rich-required contract.
+
 ### Cross-repo prerequisites and pilot boundary
 
-| Owner | Prerequisite before implementation readiness | Present status |
-|-------|---------------------------------------------|----------------|
-| Vellum (`PinkException/vellum`) | Approved Claude Design-first source/target contract, immutable snapshot and approval reference; any identifier mapping owned there. | Coordinator reports ADR-0011 and [spec 013](https://github.com/PinkException/vellum/blob/vellum-oracle-contract/docs/specs/013-design-to-oracle-handoff/spec.md); branch publication pending, link prospective. |
-| Servo (`ramboz/servo`) | Pinned mixed/deterministic result-envelope version with explicit policy verdict, required outcomes and honest execution/build binding; preservation and genuine evaluator commands. | Coordinator reports ADR-0044, [composition spec 035](https://github.com/ramboz/servo/blob/servo-required-design-evidence/docs/specs/035-required-evidence-alongside-quality-scores/spec.md) and [envelope spec 036](https://github.com/ramboz/servo/blob/servo-required-design-evidence/docs/specs/036-deterministic-design-evidence/spec.md); publication pending, links prospective. |
-| Pilot/build owner (parent-coordinated) | Small app, build-input closure, independent delivery identity and genuine frozen baseline/failure captures. | Planned, not executed; no real-world app supplied. |
-| Jig | ADR-0065 accepted in a later authorized phase; framing/readiness review and all external prerequisites satisfied. | This turn remains Proposed/DRAFT. |
+| Owner | Shared checkpoint / implementation responsibility | Reported draft owner |
+|-------|---------------------------------------------------|----------------------|
+| Vellum (`PinkException/vellum`) | C1 in 013-01 IN_PROGRESS prepares approved normal/open source captures/inputs and mapping; it unblocks downstream observer/consumer use without claiming driven-state handoff DONE or 013-02 completion. | ADR-0011 and [spec 013](https://github.com/PinkException/vellum/blob/vellum-oracle-contract/docs/specs/013-design-to-oracle-handoff/spec.md). |
+| Servo (`ramboz/servo`) | 035-01 standalone overall policy first; 036-01 then implements observation and proves served-build binding against C1 input. Pin distinct gate/envelope/config revisions at C0. | ADR-0044, [composition spec 035](https://github.com/ramboz/servo/blob/servo-required-design-evidence/docs/specs/035-required-evidence-alongside-quality-scores/spec.md) and [envelope spec 036](https://github.com/ramboz/servo/blob/servo-required-design-evidence/docs/specs/036-deterministic-design-evidence/spec.md). |
+| Pilot/build owner (parent-coordinated) | Define current/served/delivered-build input closure predicates and independent delivery reference at C0; execute genuine baseline/failure, substitution/replay and binding scenarios during implementation. | Small self-contained fixture planned; no real-world app supplied. |
+| Jig | Later ADR acceptance/readiness authority and C0 authority/identity contracts precede implementation; genuine producer-backed completion/refusal proof is in each slice's AC/DoD, using C1 inputs. | This turn remains Proposed/DRAFT. |
+
+Sibling links are coordinator-reported draft references; publication, immutable
+revisions and alignment are not independently verified here. The proposed
+acyclic start order is **Servo 035-01 standalone -> Vellum 013-01 IN_PROGRESS
+C1 source/input checkpoint -> Servo 036-01 real observer/served-build proof ->
+Jig 119-01/02 attestation -> Vellum 013-01 closes and 013-02 state integration**.
+These are named coordination checkpoints, not dependencies on entire sibling
+specs being DONE. **C0** means accepted/aligned decisions, exact input
+serialization/version/digest domains/test vectors, explicit required matrix
+and served/current/delivered-build closure predicates, with no demand for
+runnable consumer code. None of C0's concrete tolerance/transport choices is
+owner-approved yet. Runtime scenarios, substitution/replay proof and genuine
+frozen captures are produced and verified during the owning implementation
+AC/DoD, not a demand for finished integration before starting. C1's preparation
+of an open-state source capture is not 013-02's driven-state integration.
+This order remains parent-coordinated.
 
 The shared fixture starts from the requested 240px card, 44px dark band, 20px
 title, 12px subtitle and state-change control. These are proposed pilot goals,
@@ -168,21 +228,26 @@ oracle accuracy is claimed from this fixture. Figma is deferred and is not a
 DoR prerequisite.
 
 **Reported Servo vocabulary (assumption pending alignment):** proposed opt-in
-output v2 separates raw observations from policy, uses evaluation status
+overall gate-payload schema v2 separates policy from its subordinate
+design-evidence-envelope v1/raw observations, uses overall evaluation status
 `pass/fail/env_error`, required status `pass/fail/unknown`, typed reasons, and
 retains default v1 and exit-code 0/1/2 behavior. An observed missing required
 `#title`/contradiction is required fail with evaluation fail/exit 1; absent,
 stale, unbound or unsupported evidence is required unknown with environment
-error/exit 2. Only complete bound required passes can permit evaluation pass.
-Jig reads these records rather than exit codes from a live invocation; both
+error/exit 2. Complete bound required passes are necessary but not sufficient:
+the installed overall gate must also meet its quality policy. A deterministic
+component pass alone cannot clear. Jig reads the preserved overall gate-payload
+and run/digest-linked component evidence rather than exit codes from a live
+invocation; both
 negative classes map to a non-clearing review verdict with their distinct
 producer reasons retained. These are not new Jig schema definitions.
 
 ## Assumptions
 
-- **A1:** The evolving Servo producer envelope can express the predicate and
-  complete required inventory without Jig reconstructing evaluation policy.
-  Parent must align the reported vocabulary/versioning and replace prospective
+- **A1:** The evolving installed Servo gate-payload can express the authoritative
+  overall verdict and link complete subordinate evidence without Jig
+  reconstructing evaluation policy. Parent must align separately named
+  input/envelope/gate-payload/design-eval versions and replace reported
   branch links with published immutable proposal references before readiness.
 - **A2:** Vellum and the pilot build owner can provide the independently
   comparable design approval and application source/config/served-build
@@ -200,8 +265,8 @@ then Data.** No Spike: unknown interfaces are explicit prerequisites, not a
 research phase disguised as a deliverable.
 
 1. **Rules (119-01):** a developer can record a genuine rich-policy pass and
-   see a high-composite required failure or inconclusive evidence refused on
-   the existing review/completion rail.
+   see a high-composite required failure, component-pass/quality-fail control
+   or inconclusive evidence refused on the existing review/completion rail.
 2. **Path (119-02):** a previously valid pass cannot complete a changed app;
    freshness checks and renewed evidence work through final completion.
 3. **Data (119-03):** a developer can finish with supported legacy
@@ -222,6 +287,9 @@ documentation and a producer-backed scenario, not a parser-only phase.
 All slices stay DRAFT; no DoD item is represented as complete. Independent
 frame-critique evidence belongs in `reviews/` and the ADR's sibling review
 directory. A passing framing verdict is not acceptance or implementation
-readiness. Before any readiness transition, resolve the cross-repo contracts,
-publish genuine preserved evaluator samples, settle the identity comparison
-encoding and obtain the later-phase ADR/readiness authority.
+readiness. Before readiness, resolve installed overall verdict authority,
+version namespaces and identity closure/encoding at C0 and obtain later-phase
+ADR/readiness authority. C1 supplies approved source inputs without requiring
+013-01 DONE. Genuine overall
+gate/component captures and binding proof are implementation AC/DoD work,
+not a requirement that the whole integration already be complete.

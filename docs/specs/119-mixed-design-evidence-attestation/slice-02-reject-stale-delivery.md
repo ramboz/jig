@@ -15,9 +15,12 @@ design-review pass, even when the evaluator definition is unchanged.
 - [ ] 119-01 DONE; ADR-0065 accepted and readiness review passes.
 - [ ] Parent aligns build-owner input closure, canonical digests, dirty-input
   handling and the authoritative, independently determined current delivery
-  reference, including its link to the observed/served build.
-- [ ] Genuine baseline, changed-app and renewed-evaluation captures exist with
-  unchanged eval definition; include an uncommitted-input variant.
+  reference at C0, including how the observer
+  will link it to the served build.
+- [ ] Baseline/change/renewal capture protocol and C1 source inputs are defined.
+  Produce and prove genuine changed-app/renewed runs, with unchanged eval
+  definition and an uncommitted-input variant, during this slice's AC/DoD;
+  do not require already-finished integration to start.
 - [ ] Settle the machine-readable binding references within the existing
   design-review artifact conventions; do not invent new slice frontmatter.
 
@@ -37,10 +40,11 @@ design-review pass, even when the evaluator definition is unchanged.
    lifecycle back-edge first. The message names the changed binding and asks
    for fresh producer evidence/attestation, not a Jig evaluation.
 3. **Other stale or inconsistent evidence.** Changing approved source/target,
-   required policy/config, dirty inputs, effective runtime/build config or
-   referenced run/result bytes invalidates reuse through the same rail.
-   Pin the actual run reference rather than relying on the last row of a
-   mutable ledger; absence of the pinned run is non-clearing. Reject a build
+   installed gate/policy/config, dirty inputs, effective runtime/build config or
+   referenced overall/component run/result bytes invalidates reuse through the
+   same rail. A component run/digest not linked to the pinned overall gate
+   cannot support reuse. Pin the actual run reference rather than the last row
+   of a mutable ledger; absence of the pinned run is non-clearing. Reject a build
    claim that disagrees with the independently identified delivery.
 4. **Bounded deterministic revalidation.** Existing design-review evidence
    checks re-read/hash the declared references at REVIEWED and DONE, compare
@@ -49,7 +53,8 @@ design-review pass, even when the evaluator definition is unchanged.
    every other pass's code freshness or add a new lifecycle gate. A recorded
    `pass` with incomplete comparison references cannot clear this contract.
 5. **Renewed pass and honest preservation.** A genuine new producer run on
-   build B, followed by a new independent attestation recorded through the
+   build B, with authoritative overall-gate pass and matching subordinate
+   component run/digest, followed by a new independent attestation through the
    existing helper, clears with the other ordinary requirements satisfied.
    A documentation-only commit outside the declared application input closure
    does not invalidate matching app/build evidence solely because HEAD changed.
@@ -60,8 +65,9 @@ design-review pass, even when the evaluator definition is unchanged.
 
 ### Verification scenario
 
-**Preconditions:** Aligned owner-defined input manifests and preserved genuine
-captures; isolated fixture with a previously passing design-review record and
+**Preconditions:** Aligned owner-defined input manifests and genuine captures
+produced during implementation; isolated fixture with a previously passing
+overall-gate attestation and
 unrelated evidence/dependencies satisfied. Source/eval artifacts remain frozen.
 
 **Invocation:** Deliver changed build B without changing the eval definition;
@@ -85,7 +91,9 @@ revision plus dirty-input digest, full binding manifests and actual CLI outcomes
 
 **DoD:**
 - [ ] All ACs verified; stale-result reuse shown red before the change and
-  non-clearing afterward, with genuine A/B runs and declared fixture mutations.
+  non-clearing afterward, with genuine A/B overall/component runs, demonstrated
+  served-build binding, runtime substitution/replay refusal and declared
+  fixture mutations.
 - [ ] Affected review/workflow tests and host-package checks pass.
 - [ ] Independent compliance, craft and arch reviews recorded and clear.
 - [ ] Deviation log, reconciliation sweep and reconciliation review recorded.

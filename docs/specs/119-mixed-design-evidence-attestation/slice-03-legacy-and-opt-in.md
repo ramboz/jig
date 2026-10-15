@@ -12,9 +12,11 @@ silent rich-policy downgrade, while unflagged projects retain their workflow.
 
 **DoR:**
 - [ ] 119-02 DONE; ADR-0065 accepted and readiness review passes.
-- [ ] A genuine legacy producer sample and its frozen contract/config are
-  available, along with current source/target/build binding or renewed
-  producer evidence. Confirm spec A4; no handcrafted passing surrogate.
+- [ ] The owner accepts the intentional provenance cost for newly requested
+  legacy attestations; historical/unflagged behavior and defaults stay unchanged.
+- [ ] Identify the authoritative installed legacy threshold-only policy and
+  capture/renewal protocol at C0. Confirm spec A4
+  during implementation with genuine evidence; no handcrafted passing surrogate.
 - [ ] Parent aligns how a slice explicitly names its pinned producer contract
   in its existing evidence pointer; absence of rich fields is not version
   selection. Lower-is-better legacy scoring remains outside this proposal.
@@ -24,13 +26,17 @@ silent rich-policy downgrade, while unflagged projects retain their workflow.
 1. **Legacy completion without a competing schema.** An explicitly pinned,
    supported legacy threshold-only contract can clear design-review with an
    actual honest run, original composite at least its own frozen threshold
-   and all current source/config/build bindings. Record the legacy contract
+   and all current source/config/build bindings. The selected verdict must
+   cover the installed legacy policy, not only a component in a larger gate;
+   design-evidence-envelope v1 does not imply legacy gate-payload v1.
+   Record separately named legacy contracts
    and exact scope of the attestation; do not claim it satisfied richer
    required-condition policies. The existing record/check/transition path
    reaches DONE when ordinary reviews/dependencies also clear.
 2. **No silent downgrade.** Missing or unsupported rich verdict/required
-   outcomes, ambiguous contract identity, or a slice requiring rich evidence
-   with only a legacy scalar result receives non-pass and an actionable
+   outcomes, ambiguous/version-namespace-confused contract identity, or a slice
+   requiring rich evidence with only a legacy scalar result receives non-pass
+   and an actionable
    contract/evidence diagnostic, even with a high composite. No auto-adapter,
    guessed default version or format selection by missing fields.
 3. **No invented old provenance.** Genuine legacy evidence without source,
@@ -77,7 +83,8 @@ revision. State unavailable identity as unavailable, not an empty passing field.
 
 **DoD:**
 - [ ] Each AC verified with witnessed test coverage and genuine producer-backed
-  compatibility scenario, not just literal prompt assertions.
+  compatibility scenario produced during implementation, not just literal
+  prompt assertions or a component-only success promoted to overall pass.
 - [ ] Targeted review/workflow and host-rendering checks pass.
 - [ ] Independent compliance and craft reviews recorded and clear.
 - [ ] Deviation log, reconciliation sweep and reconciliation review recorded.
