@@ -66,7 +66,7 @@
 - [ADR-0060: Per-execution-mode write-boundary enforcement](adr-0060-unattended-execution-write-boundary.md) — jig enforces its checkpoints with soft, advisory hooks, a posture that quietly assumes a human is attending every run. (2026-09-08, Proposed)
 - [ADR-0061: GitHub Copilot CLI as a third committed host](adr-0061-copilot-third-host.md) — Adobe is retiring Claude Code as its sanctioned coding agent. (2026-09-15, Accepted)
 - [ADR-0064: Use-case progress rollup lives in jig as a bounded exception](adr-0064-use-case-progress-rollup-in-jig.md) — An owner of a project with many specs cannot tell whether the work is still advancing the product's goals. (2026-10-03, Accepted)
-- [ADR-0065: Attest the external policy verdict for the delivered revision](adr-0065-attest-external-policy-verdict-delivered-revision.md) — Jig's design-review pass currently attests a thresholded external score. (2026-10-14, Proposed)
+- [ADR-0065: Attest the external policy verdict for the delivered revision](adr-0065-attest-external-policy-verdict-delivered-revision.md) — Jig's design-review pass currently attests a thresholded external score. (2026-10-14, Accepted)
 
 ## Lightweight decisions
 

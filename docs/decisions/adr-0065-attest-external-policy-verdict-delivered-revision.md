@@ -1,7 +1,7 @@
 ---
-status: Proposed
+status: Accepted
 dependencies: []
-last_verified:
+last_verified: 2026-10-14
 frame_review: true
 ---
 
@@ -9,11 +9,34 @@ frame_review: true
 
 ## Status
 
-Proposed (2026-10-14)
+Accepted (2026-10-14)
 
-**Proposal only.** No decision is accepted and no source implementation has
-started. Number allocated by `adr.py new --no-push`: provisional on this
-proposal branch, not reserved on `origin/main` (main requires a PR).
+**Owner approval (2026-10-14):** the owner selected
+"Approve the ADRs and pilot contract; start implementation (Recommended)",
+as relayed by the coordinating Vellum design-oracle session. The approved Jig
+proposal is [snapshot e83ad795](https://github.com/ramboz/jig/commit/e83ad795e5bc692ea9ac4e2a25c9b6923e26522e);
+its current passing [independent frame critique](reviews/adr-0065-frame-critique.md)
+supplies the acceptance evidence. This grant covers overall-gate authority and
+build binding, the bounded matrix/local bundle and the renewed-provenance cost
+for **new** legacy attestations. It does not approve source observations,
+future real-design values, legacy-install migration, old closed-record edits
+or PR merges.
+
+**Pinned peer C0 approval references:** Vellum ADR-0011/spec 013 at
+[a538a2b4](https://github.com/PinkException/vellum/commit/a538a2b474a9f3e1119379aba44257d319e1c276),
+including the [pilot input contract](https://github.com/PinkException/vellum/blob/a538a2b474a9f3e1119379aba44257d319e1c276/docs/specs/013-design-to-oracle-handoff/input-contract-pilot.md);
+Servo ADR-0044/specs 035/036 at
+[91f8d97d](https://github.com/ramboz/servo/commit/91f8d97d2d6f7c358a5de93c22aa143fd417d07c),
+including [installed overall policy](https://github.com/ramboz/servo/blob/91f8d97d2d6f7c358a5de93c22aa143fd417d07c/docs/specs/035-required-evidence-alongside-quality-scores/spec.md)
+and [subordinate design evidence](https://github.com/ramboz/servo/blob/91f8d97d2d6f7c358a5de93c22aa143fd417d07c/docs/specs/036-deterministic-design-evidence/spec.md).
+These identify the owner-approved proposal snapshots, not claims that sibling
+implementation, source-input observations or served-build proof are complete.
+
+**Acceptance-only handoff.** No source implementation has started; spec 119
+and its slices remain DRAFT. Number allocated by `adr.py new --no-push`:
+provisional on this proposal branch until merge, not reserved on `origin/main`
+(main requires a PR). A separate implementation session may await genuine
+producer evidence; this acceptance turn neither judges nor manufactures it.
 
 Plain-language summary: a good average score must not hide a required failure,
 and evidence for yesterday's app must not complete today's delivery. Jig should
