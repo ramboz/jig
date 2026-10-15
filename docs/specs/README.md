@@ -350,7 +350,7 @@
 | [116-use-case-progress-report](116-use-case-progress-report/spec.md) | 116-02 — orient-surface | **DONE** |  |
 | [117-decision-rulings-in-context](117-decision-rulings-in-context/spec.md) | 117-01 — tbd | DRAFT |  |
 | [118-behavioral-verification-pilot](118-behavioral-verification-pilot/spec.md) | 118-01 -- author-to-review | **DONE** |  |
-| [119-mixed-design-evidence-attestation](119-mixed-design-evidence-attestation/spec.md) | 119-01 — attest-rich-policy | DRAFT |  |
+| [119-mixed-design-evidence-attestation](119-mixed-design-evidence-attestation/spec.md) | 119-01 — attest-rich-policy | IN_PROGRESS (jig-producer-backed-attesta…) |  |
 | [119-mixed-design-evidence-attestation](119-mixed-design-evidence-attestation/spec.md) | 119-02 — reject-stale-delivery | DRAFT |  |
 | [119-mixed-design-evidence-attestation](119-mixed-design-evidence-attestation/spec.md) | 119-03 — legacy-and-opt-in | DRAFT |  |
 
@@ -396,7 +396,7 @@ Advisory (ADR-0040 auditability — never blocks). Regenerated from `reviews/sli
 
 - **0** pass(es) recorded `not-shown` (selection step did not run — the kill-criterion-1 defect signal).
 - **25** pass(es) recorded `non-interactive` (declared no-orchestrator / CI).
-- **14** shown-and-declined anomaly(ies) (a high-confidence richer skill was shown and not applied):
+- **16** shown-and-declined anomaly(ies) (a high-confidence richer skill was shown and not applied):
   - `088-project-orientation/slice-02-arch.md` — applied `none`; declined: arch-review
   - `088-project-orientation/slice-02-craft.md` — applied `none`; declined: arch-review, independent-review, pr-review, scout-pr-review
   - `113-copilot-third-host/slice-02-arch.md` — applied `none`; declined: arch-review
@@ -411,3 +411,5 @@ Advisory (ADR-0040 auditability — never blocks). Regenerated from `reviews/sli
   - `116-use-case-progress-report/slice-01-craft.md` — applied `pr-review`; declined: arch-review, independent-review, scout-pr-review
   - `116-use-case-progress-report/slice-02-craft.md` — applied `pr-review`; declined: arch-review, independent-review, scout-pr-review
   - `118-behavioral-verification-pilot/slice-01-craft.md` — applied `pr-review`; declined: arch-review, independent-review, scout-pr-review
+  - `119-mixed-design-evidence-attestation/slice-01-arch.md` — applied `none`; declined: arch-review
+  - `119-mixed-design-evidence-attestation/slice-01-craft.md` — applied `none`; declined: arch-review, independent-review, pr-review, scout-pr-review

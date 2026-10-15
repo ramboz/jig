@@ -1401,7 +1401,7 @@ Concede a `pass` only if the frame survives your strongest attack.
 """
 
 
-# -------- design-review prompt (slice 071-01 / ADR-0022) --------
+# -------- design-review prompt (071-01 / 119-01, ADR-0022 / ADR-0065) --------
 
 
 _DESIGN_REVIEW_OUTPUT_FORMAT = """\
@@ -1411,25 +1411,51 @@ _DESIGN_REVIEW_OUTPUT_FORMAT = """\
 VERDICT: pass | fail | needs-changes
 
 SUMMARY:
-<1-2 sentences: which eval you attested, where its evidence lives, and your
- overall attestation>
+<1-2 sentences: selected policy, preserved run, overall attestation>
+
+CONTRACTS:
+<selected producer contract reference and each separately named version/pin>
+
+REFERENCES:
+<overall gate path/digest/run ID; component/envelope/output-tree paths, run
+ references and raw-byte digests; separately selected approval, frozen
+ policy/config and current-delivery references, not just result assertions>
 
 EVAL-RAN:
-<did the eval actually run? cite the ledger/run entry you read. An
- env_error / infra failure is NOT "ran" — it is a fail, never a pass and
- never a 0.0 composite>
+<completed honest run? cite preserved invocation/ledger, acquisition receipt
+ and served-build proof; env_error / infra failure is not a pass or 0.0>
 
 NON-STALE:
-<is the eval's frozen definition (config/threshold) unchanged since it ran?
- cite what you compared>
+<frozen effective policy/config unchanged? cite both sides of comparison>
+
+BINDINGS:
+<approved source/target, effective policy/config, evaluated/served build versus
+ independently selected current delivery: references/digests on BOTH sides,
+ digest domains and comparison outcomes; name unavailable comparisons>
+
+OVERALL-POLICY:
+<installed overall gate verdict, quality outcome and producer reasons;
+ component success is not overall success>
+
+REQUIRED-OUTCOMES:
+<policy inventory reference and every required condition ID/outcome/evidence
+ reference; optional outcomes handled by that policy>
+
+CONSISTENCY:
+<gate/component/envelope/output-tree run and raw-byte digest comparisons;
+ contradictions or missing links>
 
 THRESHOLD-MET:
-<is the latest composite >= the eval's OWN declared threshold? quote both
- the composite and the threshold>
+<legacy threshold-only: composite >= its OWN threshold; rich: supporting
+ values only, or not applicable under the selected policy>
+
+REASONS:
+<actionable producer reasons and responsible condition/quality/run references;
+ what evidence must be renewed or supplied if non-clearing>
 ```
 
-Be terse but specific. A `pass` means you ATTESTED an honest, non-stale,
-threshold-meeting eval verdict — NOT that you re-scored anything. (No
+Be terse but specific; retain references even on refusal. A `pass` means the
+selected contract's entire attestation predicate holds, NOT a new score. (No
 reconciliation-notes section: you record an attestation, you do not judge
 craft.)"""
 
@@ -1437,7 +1463,7 @@ craft.)"""
 def build_design_review_prompt(spec_path: Path, slice_label: str,
                                deliverables: list,
                                slice_path: Path | None = None) -> str:
-    """Construct the ATTEST-ONLY design-review prompt (slice 071-01 / ADR-0022).
+    """Construct the ATTEST-ONLY design-review prompt (ADR-0022 / ADR-0065).
 
     The orchestrator runs this pass AFTER the compliance + craft (+ arch +
     code-health) passes, but ONLY when the slice's frontmatter declares
@@ -1445,15 +1471,15 @@ def build_design_review_prompt(spec_path: Path, slice_label: str,
     It gates the REVIEWED transition exactly like `arch` — but its JOB is
     fundamentally different from every other pass.
 
-    HONESTY BOUNDARY (ADR-0022): the external eval (e.g. servo's
-    design-fidelity oracle) is the thing that RUNS and SCORES the UI against
-    a frozen design definition. This pass does NOT re-run, re-derive, or
-    re-judge that score. The read-only `reviewer` subagent's *only* job is to
-    ATTEST jig's own recorded eval evidence: locate it, confirm the eval
-    actually RAN, is NON-STALE (its frozen definition is unchanged), is
-    HONEST (an `env_error` / infra failure is NOT a pass and NOT a 0.0
-    composite), and that the latest composite clears the eval's OWN declared
-    threshold — then RECORD that verdict. servo runs and scores; jig attests.
+    The producer owns execution/scoring; the reviewer only reads/hashes
+    preserved evidence. Rich/mixed contracts require the installed overall
+    policy verdict (including quality), complete required outcomes and
+    consistent source/config/delivery and subordinate run/digest bindings.
+    Explicit legacy threshold-only policies keep their scalar rule, not a
+    fallback for missing rich evidence. Contract/comparison references are
+    supplied in the slice body/deliverables, never discovered by this builder.
+    This slice adds no executable producer adapter or persisted freshness
+    validator (119-02 owns reuse against changed delivery).
 
     NO richer-skill detection (unlike pr-review / arch-review): there is no
     established external "design-review" skill category to defer to — this
@@ -1472,7 +1498,7 @@ def build_design_review_prompt(spec_path: Path, slice_label: str,
 
 You are running the **design-review pass** on slice **{slice_label}**. The
 slice declared `design_review: true` — meaning it ships UI gated by an
-external, non-deterministic **design-fidelity eval** (e.g. servo's oracle).
+external **design-fidelity eval** (e.g. servo's oracle).
 
 **Your only job is to ATTEST the eval's frozen verdict — NOT to produce
 it.** The eval is the thing that RUNS the UI and SCORES it against a frozen
@@ -1481,7 +1507,117 @@ re-score, or re-judge** the eval. servo runs and scores; jig attests. That
 is the honesty boundary (ADR-0022): re-deriving the score here would
 launder a non-deterministic judgment into a deterministic-looking gate.
 
-Confirm — by READING the recorded eval evidence — that:
+## What to read (in this order)
+
+1. {slice_noun} — {slice_ref}. Read slice **{slice_label}** for its selected
+   contract, approval, frozen policy/config, independent current-delivery and
+   evidence references. Do NOT re-evaluate acceptance criteria (compliance)
+   or review craft.
+2. The pinned producer-owned contract and those separately selected comparison
+   inputs, then the preserved overall gate, subordinate evidence and referenced
+   bytes. No pointer or unreadable contract/evidence means non-pass.
+3. The supplied deliverables and evidence/context references:
+{deliverable_lines}
+
+## Select the declared contract, not a scorer
+
+Read the slice body/deliverables for the explicitly selected supported
+rich/mixed contract and its pinned producer-owned semantics. Deterministic and
+mixed evidence are both allowed. For that contract, the **installed overall
+gate-payload** under its frozen effective policy is the verdict authority,
+including quality and every policy-required condition. Design component evidence
+is subordinate support, not the completion authority.
+
+Record the Vellum input-contract, design-evidence-envelope, gate-payload and
+design-eval configuration (when used) as separately pinned version namespaces;
+one namespace's version never selects another.
+
+No automatic contract discovery: the slice body/deliverables must identify the
+contract, approval, frozen policy/config, current delivery and evidence
+references. Unsupported or ambiguous contract identity is non-clearing;
+missing rich fields never select a scalar fallback. A component-envelope v1
+does not select legacy gate-payload v1.
+
+This is read/hash-only attestation: do not invoke or import the evaluator,
+rescore, recapture, introduce new thresholds, or recompute weighted scores.
+Read the preserved verdict; do not replace compliance or craft.
+Compliance, craft and reconciliation remain independently required, along with
+any other flagged reviews. Unflagged slices and historical evidence retain
+their existing behavior; this adds no pass, stage or slice frontmatter.
+
+## Rich-policy decision
+
+Require an explicit installed overall policy `pass` and a conclusive pass for
+every required condition in its approved policy inventory. A high composite
+never overrides a required failure. An overall pass contradicting a required
+failure is non-clearing; do not compute a replacement composite or repair the
+producer's decision. Record the responsible condition, run and producer reason.
+
+A component pass with overall quality failure is non-clearing, even if every
+deterministic observation passed: cite the preserved overall quality failure,
+not component success. An overall pass contradicting a quality failure is
+non-clearing. Do not rerun or rescore to repair contradictions.
+
+Required coverage comes from the pinned installed policy inventory, not just
+the rows present in the result. Required missing, unknown, not-run, inconclusive
+or env_error outcomes cannot clear. Likewise unreadable records, unsupported
+namespaced versions, an absent explicit overall verdict, and any
+missing/mismatched subordinate run or digest require `fail` or `needs-changes`
+with an actionable reason. Optional outcomes follow the approved producer
+policy, not an extra Jig veto.
+
+For the explicitly selected Servo pilot contract, read its pinned producer
+definition: Vellum `vellum-design-input/0.1-pilot`, separately pinned design-eval
+configuration revision 2 when used; overall `kind: gate_result`, integer
+`schema_version: 2`, explicit
+`status`, `exit_code`, `reason`, `policy_hash`, required inventory/results and
+quality. Compare the installed `.servo/required-policy.json` and its approved
+pin/checks/config/evaluator bindings, not a newly inferred policy.
+
+Read `components[].result.{{path,hash}}` against the exact referenced
+`required_component_result` bytes (integer version 1, same gate run_id and
+frozen config/evaluator/source bindings). Follow each component's raw
+`evidence[].result_artifact` references to the `design_evidence` envelope
+(integer version 1) and complete capture tree. Check `command_result_artifacts`
+(integer version 1), its declared run-scoped root, manifest and complete sorted
+artifact inventory. Verify gate/component/envelope/output-tree run references
+and every referenced digest using raw-byte SHA-256, not reserialized JSON.
+Semantic identities use their separately named producer digest domains.
+Read/hash directly or inspect a preserved pure read/hash audit with its
+invocation and digest domains; an unauditable comparison cannot clear.
+Preserve paths, run IDs, hashes and comparison outcomes; do not trust an
+envelope's self-asserted binding alone.
+
+## Bind the run to the approved inputs and delivery
+
+For a new attestation, compare the run against separately supplied references:
+
+- The currently approved source snapshot and target, including Vellum approval
+  authority/revision and source/target content identities.
+- The approved frozen effective policy/config, including installed policy pin,
+  required inventory, checks/config/evaluator bindings, threshold/aggregation
+  rules and judge settings when used. Do not infer them from result rows.
+- The independently selected current delivery, not copied from the result or
+  its own run manifest. Compare source revision and dirty-input digest;
+  build/runtime inputs, config, assets and dependencies; and evaluated/served
+  build versus the build-owner delivery record and referenced bytes.
+
+Read the preserved invocation and acquisition claim/receipt, served response/
+output closure and independent delivery enumeration. Require an identifiable,
+completed honest run and credible proof of the evaluated/served build.
+Apply the producer/build-owner's declared input closure, serialization and
+named digest domains, not a Jig-invented identity. A Git SHA, URL or timestamp
+alone is insufficient. Unknown closure, inaccessible bytes or an unavailable
+comparison cannot clear. Documentation-only commits may preserve application
+identity when that declared closure proves it.
+
+Unsigned local hashes do not prove honest execution: an actor could rewrite
+artifacts and claims together. This trusted-local consistency check is not
+forgery-proof.
+
+## Explicitly legacy threshold-only evidence
+
+Only for a selected legacy threshold-only policy, confirm by READING that:
 
 1. **It RAN.** The eval actually executed and produced a verdict. An
    `env_error` / infra / harness failure is **NOT a pass** and **NOT a
@@ -1493,34 +1629,25 @@ Confirm — by READING the recorded eval evidence — that:
    OWN declared threshold** (read both from the eval's frozen config — do
    not invent a threshold).
 
-If all three hold, RECORD a `pass`. If any fails — or you cannot locate /
-read the evidence — RECORD a `fail` (or `needs-changes`) and say which.
-
-## What to read (in this order)
-
-1. The eval evidence the slice points at — the project's external
-   design-fidelity oracle. Look for a frozen eval definition + a results
-   ledger, e.g. under `.servo/design-eval/` (the frozen config with its
-   threshold, and `ledger.jsonl`'s latest composite), or whatever
-   equivalent eval verdict location the slice/spec names. Read the frozen
-   THRESHOLD and the latest COMPOSITE.
-2. {slice_noun} — {slice_ref}. Read slice **{slice_label}** only to learn
-   WHERE the eval evidence lives and what it gates — do NOT re-evaluate the
-   acceptance criteria (that's the compliance pass's job) and do NOT review
-   craft (that's the craft pass's job).
-3. The deliverables, for context on what UI the eval judged:
-{deliverable_lines}
+Read the explicitly named frozen config and ledger (e.g.
+`.servo/design-eval/ledger.jsonl`), not an automatically discovered run. The
+selected verdict must be authoritative for that installed threshold-only
+policy, not one component of a larger gate. New legacy attestations also
+require the source/config/delivery bindings above; missing provenance requires
+renewed producer evidence and cannot discharge a rich-required contract.
 
 {_PROHIBITIONS}
 ## Attest (read the evidence — do not re-derive it)
 
-- Did the eval actually RUN, or is the latest entry an `env_error` / infra
-  failure masquerading as a result? (infra failure ≠ pass ≠ 0.0)
-- Is the frozen eval definition (config + threshold) UNCHANGED since the
-  recorded composite — i.e. is the verdict non-stale?
-- Is the latest composite **>= the eval's own declared threshold**?
-- Record the verdict. Do NOT re-run the eval, do NOT recompute the
-  composite, do NOT substitute your own aesthetic judgment for the eval's.
+Record `pass` only when the entire selected contract predicate holds:
+supported readable pins, completed honest run, all three input/delivery
+bindings, authoritative overall policy pass, complete conclusive required
+outcomes and consistent subordinate run/digest/output-tree evidence. For
+explicit legacy threshold-only policy, use its scalar rule with the same
+honesty and bindings instead of rich-only outcomes. Any unmet or unverifiable
+condition means `fail` or `needs-changes`; name its producer reason and
+responsible run/condition/reference. Do NOT recompute the composite or
+substitute your own aesthetic judgment.
 
 {_DESIGN_REVIEW_OUTPUT_FORMAT}
 """
