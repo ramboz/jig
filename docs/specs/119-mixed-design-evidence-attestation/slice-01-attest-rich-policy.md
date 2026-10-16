@@ -1,10 +1,9 @@
 ---
-status: RECONCILED
+status: DONE
 dependencies: [071-01, 104-02, adr-0065]
 last_verified: 2026-10-15
 arch_review: true
 frame_review: true
-claimed_by: jig-producer-backed-attestation
 ---
 
 ## Slice 119-01 — attest-rich-policy
@@ -136,7 +135,7 @@ No historical run is relabelled; the actual Jig implementation source is
 
 ### Close-out (post-DONE)
 
-- [ ] Regenerate/audit status board; move load-bearing invariants into Notes.
+- [x] Regenerate/audit status board; move load-bearing invariants into Notes.
 - [ ] If this closes the spec, compress active-spec primer entries.
 
 **Anti-horizontal-phasing check:** The developer can consume an actual producer

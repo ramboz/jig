@@ -31,7 +31,7 @@ pending claims below. 119-02/03 remain outside this implementation.
 - [x] Produce genuine passing, required-failure and component-pass/quality-fail
   overall/component captures; prove served-build binding, then exercise
   independent review, recording, existing review checks and completion.
-- [ ] Document, validate, review, reconcile and close the vertical slice.
+- [x] Document, validate, review, reconcile and close the vertical slice.
 
 Historical492checkpoint: source/guidance/tests/host packages are implemented, but genuine
 current completion proof remains open. Actual positive attester needs-changes
@@ -45,6 +45,10 @@ scenarios, independent full closure and124CLI observations; see
 recorded in `reviews/`; reconciliation and gated closure follow the live
 slice record. Old nonpassing records are preserved; no119-02/03
 implementation is claimed.
+
+119-01 closed through normal REVIEWED, RECONCILED and DONE evidence/dependency
+gates. The spec remains IN_PROGRESS because119-02/03 remain DRAFT; no
+compress-on-spec-close primer change applies.
 
 ## 119-02 — freshness through final delivery
 
