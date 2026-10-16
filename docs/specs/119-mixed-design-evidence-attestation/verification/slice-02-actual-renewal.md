@@ -75,6 +75,52 @@ next reuse attempt; no manual back-edge or re-attester is used to notice B.
 
 ## B transition and renewed evidence
 
-Pending actual producer-owned change checkpoint and authoritative B result.
-Do not credit restoration, copied mutations, the A pass or an unevaluated
+The owner changed **only** the actual candidate HTML by appending the
+preselected `<!-- jig-119-02-renewal-B -->` comment, built
+`P/builds/renewal-B`, delivered `P/delivery-B` and changed
+`candidate-selection.json` to those roots. Actual new source raw SHA-256 is
+`9b081322ac1dddceabb0976cec58c1bb8a7d751716daca399ad14837881f8ae3`,
+versus A's `655d86c5a41078701413e1f002904c30b99fdeda1cd795dfe24b9bdebbaa58f9`.
+The source/config/approval and original A run/receipt/context records were
+not replaced. Selection raw changed from
+`a937650a4c2b2529dc6864640b0af36e00d4a20b9ba4a2da9d3fa7ecc7e892d3`
+to `e7693ed157b3b6e350fc345b99b055128c7328a7fc4cb57a89168a0011f173a9`.
+
+Before any fresh B attestation or recording, the unchanged actual recorded
+A pass was reused for `check-reviews`, `transition REVIEWED` and
+`transition DONE`. **All three exit2 solely for design freshness**:
+
+```text
+[design-review] design-freshness: installed_config: raw hash mismatch;
+changed binding; obtain fresh producer evidence and independent attestation
+```
+
+The offending installed-config reference is the independently selected
+mutable `candidate-selection.json`, now selecting the actual B build and
+delivery. The trace also enumerates the changed candidate-input hash above;
+this is not a missing unrelated review or preparation-context replacement.
+All other normal DONE prerequisites are satisfied and labelled synthetic.
+No manual back-edge, A re-record, fresh attester or Jig input mutation was
+used to detect this change.
+
+`J/actual-44a-A/refusal-on-real-B.json`, raw
+`1e7b95502c2d6a3a60efe62f075f622131e42a1fedf2b869b64196044fb0ebfc`,
+preserves exact commands/stdout/stderr, the specific changed current
+references and assertions that A's body, selection and context remain
+byte-identical. The earlier recorded A hash remains
+`fc9918f974f0c3eedb5fd661b7b69dfca7760d9d5d301be2b675da7271c0866c`.
+
+The distinct producer B PRE-RESULT raw is
+`0ad47aa95c86b27c956dfb98f6a2b768c5eba677ab825e0eee34ad487d48b985`.
+A pre-result pure comparison,
+`J/actual-44a-A/B-pre-result-same-frozen-definition.json`, raw
+`83c179e88f51be823ea64760429eb02b83cf62bf77a0cbb0a233be80caf794eb`,
+verifies all16named frozen pins, the complete approved required binding and
+approved source inventory are identical A/B. Operational request-history
+progress is not misclassified as a grading-definition change. The parent
+independently pins B before B's producer result exists.
+
+**Still pending:** authoritative genuine B result and fresh B attestation/
+recording/normal completion. The actual stale-A refusal above does not
+credit restoration, copied mutations, the A pass or an unevaluated
 comment-only change as genuine renewed B acceptance.
