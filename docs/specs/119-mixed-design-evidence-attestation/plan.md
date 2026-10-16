@@ -1,5 +1,109 @@
 # Plan: mixed design-evidence attestation
 
+## 119-02 implementation checkpoint (2026-10-15)
+
+Exact selected parent and initial HEAD:
+`15c7af924b8d484d8664f4a0db1ff2455a112855`
+(`jig-producer-backed-attestation`, 119-01 DONE). The local parent and the
+three supplied source hashes were verified before editing. The inherited SSH
+identity could not read origin; a command-scoped existing personal `gh`
+profile and HTTPS transport then verified the remote branch and open PR #243
+at that exact SHA without changing remotes or global authentication.
+
+### Persisted freshness boundary
+
+Keep the existing design-review artifact and REVIEWED/DONE composition.
+Encode a finite, versioned JSON binding block in its body, not frontmatter.
+The slice body explicitly selects the rich contract and independently selected
+comparison context; that selection requires a complete binding block and
+cannot downgrade to historical scalar evidence when the block is missing.
+Unselected historical evidence and unflagged slices retain their existing rail.
+
+The binding block pins the independently selected context and its raw digest,
+approved source/target and effective policy/config, actual overall/component/
+envelope references and run IDs, and complete reviewed raw-byte inventories.
+Named reference roles cover source approval, checks, full oracle, installed
+policy/config, runtime (including every nested file), acquisition/captures,
+candidate inputs, build output and independently selected local delivery.
+References are rooted in explicitly reviewed project/evidence directories;
+reject traversal, aliases, symlink escapes, duplicate/partial inventories,
+nonfinite JSON, unsupported contracts and unknown record kinds. Do not follow
+arbitrary path-shaped strings or evaluate a programmable comparison language.
+The independent reviewer remains responsible for inventory completeness and
+initial producer semantics; recording must not silently discover/authorize
+new comparison inputs from the producer result.
+
+At recording and reuse, re-read the pinned context, exact referenced bytes and
+closed-directory inventories. Mutable source/build/delivery bytes must match
+the independently selected pre-result expectations, not merely a manifest's
+outer hash or the producer's own current-delivery assertion. Bind the actual
+overall run to its component/envelope/capture inventories. A same-HEAD dirty
+source change, asset/output mutation or same-URL selected delivery change
+refuses without a lifecycle back-edge or fresh reviewer. Restoring exact
+bytes can restore consistency; changed work needs new producer evidence and
+independent attestation. Changes outside the declared application closure
+are not blanket HEAD invalidations.
+
+The supported transport is the accepted controlled sealed local bundle.
+Served-response hashes link observed captures to that selected bundle;
+this does not certify arbitrary HTTP servers, hostile hosts or authentic
+execution against an actor able to rewrite all local records. The guard
+performs only bounded reads, enumeration and hashing: zero producer,
+evaluator, judge, browser, recapture, network or scoring calls.
+
+### Proof and completion obligations
+
+Reuse the genuine frozen 6cc759e baseline and its complete 119-01 attestation
+without relabelling its source epoch. Index raw SHA-256:
+`45a2df047e05d1dab67982a4b4a0280607537cf78094ad71fcd70b217bb2b2fc`.
+Use disposable, explicitly labelled copied fixtures for mutations; original
+read-only proof and closed 119-01 records remain untouched. Preserve the
+recorded positive body unchanged during every stale/recovery attempt and
+satisfy unrelated lifecycle requirements separately, labelled synthetic.
+
+Witness failing tests before implementation; prove initial clear, changed
+source/asset/output/delivery/config/policy/runtime/capture/run refusal at
+REVIEWED and DONE, and exact-byte restoration. Genuine renewed changed-build
+overall PASS plus independent context is still required for AC5: the parent
+owns producer execution and will supply it. Do not replace an unavailable
+renewal with a handcrafted pass or mark that AC complete. A newer capture
+helper epoch is not retroactively attributed to the old frozen evidence.
+
+Use independent framing/readiness, implementer TDD, ordered compliance/craft/
+architecture and reconciliation reviews, normal helper transitions, official
+host generation/drift checks and scoped Python tests. 119-03, Accepted ADRs,
+closed records, conventions and other repositories are outside this slice.
+
+### Honest draft checkpoint
+
+At draft publication, the final guard and copied genuine-evidence reuse proof
+were implemented and verified. Actual checkpoint compliance was
+**needs-changes solely for AC5**: the parent-owned changed-build renewal was
+not yet available. The
+first compliance review's NUL-root diagnostic bug was fixed with witnessed
+red/green tests; the complete actual mutation witness was repeated on the
+final source. See [verification/slice-02-freshness-proof.md](verification/slice-02-freshness-proof.md)
+and [the actual checkpoint verdict](verification/slice-02-compliance-checkpoint.md).
+
+The coordinating owner directed publication of a separate stacked **draft
+IN_PROGRESS checkpoint** while genuine evidence is produced, not out-of-order
+full craft/arch/reconciliation passes or a fabricated DONE. The same worktree
+will resume: independently attest/record/check genuine A while A is still
+current; preserve that recorded body unchanged; observe current B invalidate
+A before any fresh B record; then independently attest genuine renewed B
+under the same frozen definition. Only then rerun fresh ordered compliance,
+craft, arch and reconciliation and advance through normal closure gates.
+
+**Later actual renewal:** that same-worktree sequence is now executed, not
+planned: [actual44a proof](verification/slice-02-actual-renewal.md) preserves
+the initial A record/check, unchanged-A refusal after actual B, then genuine
+same-frozen B attestation and same-fixture completion. All16frozen pins,
+approved source authority and full required binding match A/B; operational
+counter progress was not mistaken for grading identity. Fresh ordered
+whole-slice compliance, craft, architecture and reconciliation now pass and
+are recorded through the normal helper; original checkpoint nonpasses remain
+preserved. Final slice frontmatter and regenerated board own lifecycle state.
+
 ## 119-01 implementation checkpoint (2026-10-15)
 
 The owner accepted ADR-0065 and C0. This implementation is stacked on

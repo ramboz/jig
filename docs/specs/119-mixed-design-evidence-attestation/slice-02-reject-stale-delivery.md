@@ -1,7 +1,7 @@
 ---
-status: DRAFT
+status: DONE
 dependencies: [119-01, adr-0065]
-last_verified:
+last_verified: 2026-10-15
 arch_review: true
 frame_review: true
 ---
@@ -12,17 +12,23 @@ frame_review: true
 design-review pass, even when the evaluator definition is unchanged.
 
 **DoR:**
-- [ ] 119-01 DONE; ADR-0065 accepted and readiness review passes.
-- [ ] Parent aligns build-owner input closure, canonical digests, dirty-input
+- [x] 119-01 DONE; ADR-0065 accepted and readiness review passes.
+- [x] Parent aligns build-owner input closure, canonical digests, dirty-input
   handling and the authoritative, independently determined current delivery
   reference at C0, including how the observer
   will link it to the served build.
-- [ ] Baseline/change/renewal capture protocol and C1 source inputs are defined.
+- [x] Baseline/change/renewal capture protocol and C1 source inputs are defined.
   Produce and prove genuine changed-app/renewed runs, with unchanged eval
   definition and an uncommitted-input variant, during this slice's AC/DoD;
   do not require already-finished integration to start.
-- [ ] Settle the machine-readable binding references within the existing
+- [x] Settle the machine-readable binding references within the existing
   design-review artifact conventions; do not invent new slice frontmatter.
+
+Readiness: the 119-02 checkpoint in [plan.md](plan.md) defines the bounded
+encoding and proof obligations. Independent framing and spec-readiness both
+pass; the actual response is preserved in
+[verification/slice-02-readiness-response.md](verification/slice-02-readiness-response.md).
+Genuine renewed-build acceptance remains an implementation obligation.
 
 **Acceptance Criteria:**
 
@@ -70,39 +76,45 @@ produced during implementation; isolated fixture with a previously passing
 overall-gate attestation and
 unrelated evidence/dependencies satisfied. Source/eval artifacts remain frozen.
 
-**Invocation:** Deliver changed build B without changing the eval definition;
-attempt `check-reviews`/REVIEWED and DONE with A's evidence. Repeat with a dirty
-input, changed config/approval, then genuine renewed run/attestation on B.
-Exercise documentation-only preservation separately. Publish exact commands
-with the future fixture, not invented executable claims in this draft.
+**Invocation:** Exact observed commands are preserved in
+[the mutation witness](verification/slice-02-freshness-proof.md) and
+[the actual sequential renewal](verification/slice-02-actual-renewal.md):
+reuse A at `check-reviews`/REVIEWED/DONE after current B changes, then clear
+with genuine independently attested B. Dirty/config/approval corruption and
+documentation-only preservation are exercised separately and labelled.
 
 **Preserved behavior:** No rerun in review, no automatic back-edge requirement
 to notice changed delivery, no blanket HEAD-based invalidation.
 
-**Code revision / dirty-change identity:** Preserve Jig revision, application
-revision plus dirty-input digest, full binding manifests and actual CLI outcomes.
+**Code revision / dirty-change identity:** Exact exercised source hashes, genuine
+frozen6cc producer run, independent context, full rooted inventories and actual
+CLI outcomes are preserved in
+[verification/slice-02-freshness-proof.md](verification/slice-02-freshness-proof.md).
+Actual44a A/B source/build/delivery/context/run identities are preserved in
+[the renewal record](verification/slice-02-actual-renewal.md). Synthetic
+transport Git HEAD is labelled separately from producer revision.
 
 | Step | AC | Expected | Observed | Outcome | Evidence |
 |------|----|----------|----------|---------|----------|
-| Build B, unchanged definition, reuse A pass | 1, 2, 4 | Both review reuse and DONE refuse stale build | Not executed | not-run | Genuine A/B captures and gate trace, pending |
-| Dirty/config/source/result mismatch | 1, 3, 4 | Precise refusal; no evaluator run | Not executed | not-run | Genuine changed-input runs and labelled corruption fixtures, pending |
-| Fresh evaluation and attestation of B | 5 | Existing completion rail clears | Not executed | not-run | Genuine renewed run and CLI trace, pending |
-| Documentation-only change | 5 | App identities unchanged; no HEAD-only refusal | Not executed | not-run | Scoped input-manifest comparison, pending |
+| Changed declared current bytes, unchanged definition, reuse A pass | 1, 2, 4 | Both review reuse and DONE refuse stale build | Same actual recorded pass refuses copied candidate/build/delivery changes without back-edge; all bytes restored | pass | [72CLI trace and initial actual wrapper attestation](verification/slice-02-freshness-proof.md) |
+| Dirty/config/source/result mismatch | 1, 3, 4 | Precise refusal; no evaluator run | 12copied source/config/policy/checks/oracle/runtime/capture/acquisition cases,36refusals; structural reference controls in tests | pass | [Exact mutation/refusal/restoration evidence](verification/slice-02-freshness-proof.md) |
+| Fresh evaluation and attestation of B | 5 | Existing completion rail clears | Actual44a A recorded/cleared before real B; unchanged A refuses; genuine same-frozen B .9675/28requiredpass independently attested and same fixture clears DONE | pass | [Actual A/B chronology and14CLI traces](verification/slice-02-actual-renewal.md) |
+| Documentation-only change | 5 | App identities unchanged; no HEAD-only refusal | Synthetic transport HEAD changes outside declared input closure; same pass clears normal fixture DONE | pass | [Scoped input-manifest/Git witness](verification/slice-02-freshness-proof.md) |
 
 **DoD:**
-- [ ] All ACs verified; stale-result reuse shown red before the change and
+- [x] All ACs verified; stale-result reuse shown red before the change and
   non-clearing afterward, with genuine A/B overall/component runs, demonstrated
   served-build binding, runtime substitution/replay refusal and declared
   fixture mutations.
-- [ ] Affected review/workflow tests and host-package checks pass.
-- [ ] Independent compliance, craft and arch reviews recorded and clear.
-- [ ] Deviation log, reconciliation sweep and reconciliation review recorded.
-- [ ] Live instructions cover current-delivery comparison and trust limitations.
+- [x] Affected review/workflow tests and host-package checks pass.
+- [x] Independent compliance, craft and arch reviews recorded and clear.
+- [x] Deviation log, reconciliation sweep and reconciliation review recorded.
+- [x] Live instructions cover current-delivery comparison and trust limitations.
 
 ### Close-out (post-DONE)
 
-- [ ] Regenerate/audit status board; retain the stale-delivery invariant in Notes.
-- [ ] If this closes the spec, compress active-spec primer entries.
+- [x] Regenerate/audit status board; retain the stale-delivery invariant in Notes.
+- N/A: 119-03 remains DRAFT, so this does not close the spec or compress primers.
 
 **Anti-horizontal-phasing check:** A developer sees old evidence refused on an
 actually changed app and can complete only after a genuine renewed attestation.
@@ -115,8 +127,79 @@ setting is spec A3, not proof against co-edited evidence.
 
 ### Deviation log (after reconciliation)
 
-Not implemented; no deviations claimed.
+The existing design-review recorder and evidence validator now share a finite
+read/hash consumer. Selection/context/bindings are JSON blocks in existing
+bodies, not new frontmatter, states or passes. Exact named references and
+closed inventories are reviewer-authored; the writer never silently discovers
+or approves new comparison inputs. Historical unselected/unflagged workflows
+are preserved; broad legacy work remains119-03.
+
+The first served-link draft incorrectly assumed a separate raw response body
+file. Actual producer records instead declare response hashes in observation
+`loaded_resources`; a witnessed red and surgical fixed-field link now match
+that supported contract without adding a programmable query language.
+The first real wrapper attester found a missing installed runtime pin and an
+incomplete actual-copy output audit; both were corrected before recording
+the passing wrapper. Original producer records and earlier nonpasses remain
+preserved. No score, approval, frozen policy or source epoch was rewritten.
+The first whole-slice compliance review also found malformed root NUL bytes
+escaping as a Python3.9 internal error. A witnessed red precedes the lexical
+root preflight and recording/reuse regressions; final mutation and
+already-DONE proofs were repeated on the corrected guard.
+
+Code/tests/live guidance and all three official host packages are implemented.
+Automatic old-pass refusal/restoration is proved with genuine preserved
+producer verdicts and explicitly labelled copied mutation/transport fixtures,
+including all3887currentexternalruntime files. The first draft checkpoint
+honestly lacked genuine same-definition B renewal and retained needs-changes.
+The later actual44a A/B sequence now resolves that acceptance gap: initial
+A was independently recorded and machine-cleared while current; unchanged
+A then refused actual B before any B attestation; genuine same-frozen B was
+independently attested/recorded and cleared the same isolated fixture.
+See [the actual chronology](verification/slice-02-actual-renewal.md).
+Restoration is not credited as renewal. Fresh whole-slice compliance, craft
+and architecture reviews pass and are recorded through the normal helper;
+the real slice entered REVIEWED through its evidence gate. Independent
+reconciliation also passes and is recorded. Reconciliation/DONE are advanced
+only by their normal helpers; final frontmatter is the lifecycle authority.
+
+Fresh complete compliance passes. Craft also passes with a nonblocking
+test-isolation nit: empty/partial component mutations had hit an earlier
+overall-link mismatch. A witnessed targeted red now precedes re-pinning that
+synthetic overall link and asserting the intended component-evidence
+diagnostics; all25freshness tests pass. This strengthens only this slice's
+tests, changes no production bytes or old guard expectation, and is not a
+new grading fixture. The original craft response is preserved unchanged.
 
 ### Reconciliation sweep
 
-Pending implementation and independent reconciliation.
+Independently reviewed reconciliation sweep:
+
+| Surface | Disposition | Reason |
+|---------|-------------|--------|
+| Source recorder/shared evidence validator/finite binding helper + tests | updated | Same read/hash check at recording and existing REVIEWED/DONE composition |
+| Independent-review live instructions and finite encoding | updated | Explicit opt-in, current raw bytes/complete inventories, independent context and limits |
+| `docs/workflow.md`, `docs/architecture.md` | updated | Existing approved consumer boundary; no new ADR decision or producer runtime |
+| Three generated host packages | updated | Official builder and drift guard only; never hand-edited |
+| 119plan/tasks/slice/verification/reviews and status board | updated | Exact parent/readiness/proof, preserved earlier nonpasses and genuine renewed A/B; normal helpers own state |
+| Inbox, primers, Accepted ADRs, conventions and closed records | no-op | SymPill/real-app autonomous-pilot entries remain out of this controlled-card scope; spec remains open, no amendment/convention authority |
+| Other repositories and installed/global plugins | no-op | External evidence/toolchain read-only; parent owns producer renewal/integration |
+| Broad legacy migration and new provenance UX | deferred | 119-03 remains DRAFT |
+| `docs/memory/learnings.md` | updated | Installed-vs-source runtime, actual served-response/copy-audit and operational-counter pitfalls; summary/team-check completed |
+| Final reconciliation verdict | updated | Actual independent pass recorded after ordered compliance/craft/arch; no invented lifecycle pass |
+
+**Leanness sweep:** finite rooted file/tree records serve the two existing
+writer/validator callers. No generic comparison DSL, producer runtime,
+registry, new pass/state/frontmatter, latest pointer or unrelated code
+freshness mechanism was added. Strict paths, typed namespaces, complete
+inventories and fixed run/served links are required by the acceptance
+criteria, not speculative extension points.
+
+**Decision routing:** ADR-0065 already authorizes this consumer boundary;
+the finite body encoding is its routine implementation, not a new decision.
+No out-of-spec UI/lightweight decision or convention change was made.
+
+**Review routing:** candidate channels were shown; explicit baseline selection
+honors the owner's no-Scout boundary. Other high-confidence names were jig's
+baseline or different review categories, not a permitted richer substitute.
+The recorder's shown-but-declined advisory is non-gating and preserved.

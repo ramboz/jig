@@ -2,8 +2,9 @@
 
 This is a work plan, not an implementation completion checklist.
 Authoring review evidence is in the ADR and slice `reviews/` directories.
-The 2026-10-15 implementation checkpoint in `plan.md` supersedes proposal-era
-pending claims below. 119-02/03 remain outside this implementation.
+The 2026-10-15 implementation checkpoints in `plan.md` supersede proposal-era
+pending claims below. This worktree implements only 119-02, stacked on the
+completed 119-01 parent. 119-03 remains DRAFT and outside this implementation.
 
 ## Before readiness
 
@@ -47,18 +48,47 @@ slice record. Old nonpassing records are preserved; no119-02/03
 implementation is claimed.
 
 119-01 closed through normal REVIEWED, RECONCILED and DONE evidence/dependency
-gates. The spec remains IN_PROGRESS because119-02/03 remain DRAFT; no
-compress-on-spec-close primer change applies.
+gates. At that checkpoint119-02/03 were DRAFT. Current119-02 state is in its
+own record;119-03 remains DRAFT, so no compress-on-spec-close primer change
+applies.
 
 ## 119-02 — freshness through final delivery
 
-- [ ] Write failing tests for changed app with unchanged eval definition and
+- [x] Verify exact selected parent locally/remotely and all three source pins.
+- [x] Pass independent framing/spec-readiness and claim through normal helpers.
+- [x] Write failing tests for changed app with unchanged eval definition and
   reuse of a previously passing review at DONE without a back-edge.
-- [ ] Narrowly add source/target, effective policy/config and app/delivery
+- [x] Narrowly add source/target, effective policy/config and app/delivery
   reference/digest checks to existing design-review evidence validation.
-- [ ] Exercise genuine A/B/renewed runs and dirty/config/approval changes;
+- [x] Exercise genuine A/B/renewed runs and dirty/config/approval changes;
   preserve documentation-only application identity.
-- [ ] Record trust limits, validate, review, reconcile and close the slice.
+- [x] Record trust limits, validate, review, reconcile and close the slice.
+
+Current checkpoint: 25new/173affectedtests and normal selected-old-PASS
+read/hash reuse proof pass. Twelvecopied changes yield36specific refusals in
+72actualCLIobservations with unchanged pass/GitHEAD/size/mtime; restoration and
+outside-closure documentation change clear. All3887currentexternalruntime
+files and39copiedoutputfiles rehashed. Genuine changed-build renewal, not
+restoration, is now separately proved by the actual44a A/B sequence in
+`verification/slice-02-actual-renewal.md`; the old checkpoint gap is preserved
+as history, not waived.
+The compliance-discovered root-NUL diagnostic bug is fixed with witnessed
+red/green recording/reuse regressions; final genuine mutation proof was
+repeated on that exact guard source. Fresh full ordered compliance, craft,
+architecture and reconciliation passed; actual11902 then cleared normal
+REVIEWED, RECONCILED and DONE evidence/dependency gates. The claim is released
+and the board regenerated/audited with the invariant retained in Notes.
+119-03 remains DRAFT; no spec-level compression or legacy expansion applies.
+
+Readiness additionally executed `land.py prepare` using the explicit
+session-local216-test target (the existing custom-test-command mechanism),
+not an unrelated full-repository run. All status/test/deviation/DoD checks
+clear. Its test-target-directory cross-ref warning was resolved by separately
+calling the existing `check_cross_ref_state` against the **actual repository**:
+`blocked: false`, empty detail and warning. Both raw reports are preserved
+as `119-02-landing-readiness.md` and `119-02-actual-repo-crossref.json` under
+the verification record's session artifact root. No gate override, merge,
+new producer call or inferred pass was used.
 
 ## 119-03 — bounded legacy and opt-in preservation
 

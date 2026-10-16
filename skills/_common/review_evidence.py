@@ -33,6 +33,9 @@ enforced here — it reduces to `verdict != pass`, which `verdict_clears`
 already rejects. Bug 039 narrowed the deferral: after a review
 *back-edge* (which stamps `review_reopened_at`), a verdict not newer than the
 stamp no longer clears — see `stale_after_reopen_problem`.
+Selected rich design evidence is the bounded exception (119-02): its explicit
+raw references and closed delivery inventories are revalidated without
+evaluating the UI or imposing general code freshness on other passes.
 """
 
 from __future__ import annotations
@@ -41,6 +44,7 @@ import datetime
 import re
 from pathlib import Path
 
+from _common.design_bindings import freshness_problem
 from _common.parsing import (
     FRONTMATTER_TRUTHY,
     SliceLookupError,
@@ -516,6 +520,15 @@ def _design_review_flag(spec_path, slice_fragment: str) -> bool:
     return _review_flag(spec_path, slice_fragment, "design_review")
 
 
+def design_freshness_problem(spec_path, slice_fragment: str, body: str) -> str:
+    """Shared writer/reuse check for an explicitly selected design contract."""
+    try:
+        loc = load_slice(Path(spec_path), slice_fragment)
+    except SliceLookupError as exc:
+        raise EvidenceError(str(exc)) from exc
+    return freshness_problem(loc.text[loc.start:loc.end], body)
+
+
 def validate_evidence(spec_path, slice_fragment: str, stage: str) -> list:
     """Validate the evidence set required to enter `stage` for one slice.
 
@@ -570,6 +583,16 @@ def validate_evidence(spec_path, slice_fragment: str, stage: str) -> list:
             stale = stale_after_reopen_problem(rec.fields, reopened_at)
             if stale:
                 problems.append(stale)
+            if pass_name == "design-review":
+                try:
+                    body = path.read_text(encoding="utf-8")
+                except (OSError, UnicodeError):
+                    problems.append("design-freshness: inaccessible attestation; obtain "
+                                    "fresh producer evidence and independent attestation")
+                else:
+                    freshness = design_freshness_problem(spec_path, slice_fragment, body)
+                    if freshness:
+                        problems.append(freshness)
         for problem in problems:
             diagnostics.append(
                 f"[{pass_name}] {problem} "

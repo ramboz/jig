@@ -411,8 +411,25 @@ keeps its scalar rule with new-attestation provenance, never a rich fallback;
 historical/unflagged behavior is unchanged. See
 [the procedure and producer pins](../skills/independent-review/SKILL.md#design-review-attest-only-pass--adr-0022--adr-0065-on-demand).
 The attester's body retains comparisons/reasons; existing recorded verdicts
-gate REVIEWED/DONE. Automatic persisted freshness revalidation is **119-02**,
-not part of the 119-01 prompt change; independent compliance is not replaced.
+gate REVIEWED/DONE. For the explicitly selected rich pilot, the
+[finite body encoding](../skills/independent-review/design-bindings.md)
+pins independently selected context, reviewed roots, exact raw references and
+complete input/runtime/output/delivery inventories. `record-review` validates
+a selected passing body before writing; the same existing evidence validator
+re-reads those bindings at REVIEWED and DONE. Changed source, dirty inputs,
+policy/config, referenced evidence or selected delivery bytes refuse an old
+pass without a manual back-edge or another attester. Exact restoration can
+restore consistency; actual changed work requires renewed producer evidence
+and independent attestation. A documentation-only HEAD change outside the
+declared application closure does not itself invalidate the pass.
+
+This narrow 119-02 check does not migrate unselected historical/legacy records,
+validate other passes' code freshness, or replace independent compliance.
+Unsupported/malformed selections or missing required bindings do not select a
+scalar fallback. The approved transport is a controlled sealed local bundle:
+recorded served-response hashes link captures to selected bundle bytes, not
+arbitrary live HTTP servers. Unsigned local evidence and reviewer-selected
+roots establish consistency, not forgery-proof execution or hostile-host trust.
 
 The reviewer's isolation is prompt- and tool-scoped — a self-contained
 prompt plus read-only tools — not a hard sandbox (parent context is
