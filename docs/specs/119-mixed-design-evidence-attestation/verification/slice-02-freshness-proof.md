@@ -173,6 +173,17 @@ external runtime drift, complete inventories, historical/unflagged preservation
 and explicit-selected missing-binding refusal. These structural fixtures are
 labelled synthetic; they are not manufactured producer grades.
 
+The subsequent craft pass found a nonblocking test-isolation gap: empty/
+partial component mutations first hit the overall-link check. The targeted
+red in `J/119-02-craft-isolation-red.txt` demonstrates that false coverage;
+re-pinning the synthetic overall digest and asserting the specific nested
+diagnostics fixes it, with `...craft-isolation-green.txt` preserving all25
+freshness tests green. No production bytes or previous guard tests were
+weakened. Final combined validation runs216tests (25freshness,173affected,
+18host-package), scoped Ruff/Pyright and real three-host drift checks.
+The host-package suite intentionally prints a stale-manifest negative-fixture
+message while all18tests exit0; the separate real drift check clears.
+
 The guard and proof perform zero producer/evaluator/judge/browser/recapture
 calls. CLI harness subprocesses invoke only Jig/Git; production freshness
 validation reads/hashes. No network/live-server claim, hostile-host guarantee
@@ -180,10 +191,11 @@ or authenticity/signature claim is introduced. Root authority, initial
 semantic equality and closure completeness remain trusted independent review.
 Broad legacy migration/renewal UX remains119-03, still DRAFT.
 
-**Outstanding:** genuine changed-build B renewed overall PASS under the same
-frozen evaluation definition plus independent delivery context and fresh
-attestation (AC5), then whole-slice reviews/reconciliation/lifecycle. The
-isolated fixture's DONE is not Jig119-02 DONE.
-The [fresh checkpoint compliance](slice-02-compliance-checkpoint.md) identifies
-AC5 as the sole remaining acceptance blocker after the NUL fix. Publication
-is an explicitly authorized stacked IN_PROGRESS draft, not a release.
+**Historical draft checkpoint gap:** the
+[actual checkpoint compliance](slice-02-compliance-checkpoint.md) honestly
+identified missing genuine AC5 renewal after the NUL fix. The later
+[actual44a A/B execution](slice-02-actual-renewal.md) now supplies independent
+current-A recording, automatic unchanged-A refusal on actual B, and genuine
+same-frozen renewed-B attestation/completion. No copied restoration was
+promoted to that proof. Whole11902 lifecycle still requires its own ordered
+reviews/reconciliation; isolated fixture DONE is not that state.

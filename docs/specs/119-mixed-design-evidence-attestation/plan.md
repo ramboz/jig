@@ -76,9 +76,10 @@ closed records, conventions and other repositories are outside this slice.
 
 ### Honest draft checkpoint
 
-The final guard and copied genuine-evidence reuse proof are implemented and
-verified. Fresh whole-slice compliance is **needs-changes solely for AC5**:
-the parent-owned actual changed-build renewal is not available yet. The
+At draft publication, the final guard and copied genuine-evidence reuse proof
+were implemented and verified. Actual checkpoint compliance was
+**needs-changes solely for AC5**: the parent-owned changed-build renewal was
+not yet available. The
 first compliance review's NUL-root diagnostic bug was fixed with witnessed
 red/green tests; the complete actual mutation witness was repeated on the
 final source. See [verification/slice-02-freshness-proof.md](verification/slice-02-freshness-proof.md)
@@ -92,6 +93,16 @@ current; preserve that recorded body unchanged; observe current B invalidate
 A before any fresh B record; then independently attest genuine renewed B
 under the same frozen definition. Only then rerun fresh ordered compliance,
 craft, arch and reconciliation and advance through normal closure gates.
+
+**Later actual renewal:** that same-worktree sequence is now executed, not
+planned: [actual44a proof](verification/slice-02-actual-renewal.md) preserves
+the initial A record/check, unchanged-A refusal after actual B, then genuine
+same-frozen B attestation and same-fixture completion. All16frozen pins,
+approved source authority and full required binding match A/B; operational
+counter progress was not mistaken for grading identity. Fresh ordered
+whole-slice compliance, craft, architecture and reconciliation now pass and
+are recorded through the normal helper; original checkpoint nonpasses remain
+preserved. Final slice frontmatter and regenerated board own lifecycle state.
 
 ## 119-01 implementation checkpoint (2026-10-15)
 

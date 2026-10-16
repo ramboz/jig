@@ -351,7 +351,7 @@
 | [117-decision-rulings-in-context](117-decision-rulings-in-context/spec.md) | 117-01 — tbd | DRAFT |  |
 | [118-behavioral-verification-pilot](118-behavioral-verification-pilot/spec.md) | 118-01 -- author-to-review | **DONE** |  |
 | [119-mixed-design-evidence-attestation](119-mixed-design-evidence-attestation/spec.md) | 119-01 — attest-rich-policy | **DONE** | Installed overall-policy authority + independently pinned closure; read/hash-only initial attestation. Persisted-pass freshness remains119-02. |
-| [119-mixed-design-evidence-attestation](119-mixed-design-evidence-attestation/spec.md) | 119-02 — reject-stale-delivery | IN_PROGRESS (jig-delivery-freshness-guard) |  |
+| [119-mixed-design-evidence-attestation](119-mixed-design-evidence-attestation/spec.md) | 119-02 — reject-stale-delivery | RECONCILED (jig-delivery-freshness-guard) | Selected raw/context/inventory revalidation at REVIEWED/DONE; zero producer/judge calls; genuine actual44a A-record, unchanged-A refusal on B, renewed-B completion; historical unselected evidence preserved. |
 | [119-mixed-design-evidence-attestation](119-mixed-design-evidence-attestation/spec.md) | 119-03 — legacy-and-opt-in | DRAFT |  |
 
 ## Deferred slices
@@ -396,7 +396,7 @@ Advisory (ADR-0040 auditability — never blocks). Regenerated from `reviews/sli
 
 - **0** pass(es) recorded `not-shown` (selection step did not run — the kill-criterion-1 defect signal).
 - **25** pass(es) recorded `non-interactive` (declared no-orchestrator / CI).
-- **15** shown-and-declined anomaly(ies) (a high-confidence richer skill was shown and not applied):
+- **17** shown-and-declined anomaly(ies) (a high-confidence richer skill was shown and not applied):
   - `088-project-orientation/slice-02-arch.md` — applied `none`; declined: arch-review
   - `088-project-orientation/slice-02-craft.md` — applied `none`; declined: arch-review, independent-review, pr-review, scout-pr-review
   - `113-copilot-third-host/slice-02-arch.md` — applied `none`; declined: arch-review
@@ -412,3 +412,5 @@ Advisory (ADR-0040 auditability — never blocks). Regenerated from `reviews/sli
   - `116-use-case-progress-report/slice-02-craft.md` — applied `pr-review`; declined: arch-review, independent-review, scout-pr-review
   - `118-behavioral-verification-pilot/slice-01-craft.md` — applied `pr-review`; declined: arch-review, independent-review, scout-pr-review
   - `119-mixed-design-evidence-attestation/slice-01-craft.md` — applied `pr-review`; declined: arch-review, independent-review, scout-pr-review
+  - `119-mixed-design-evidence-attestation/slice-02-arch.md` — applied `none`; declined: arch-review
+  - `119-mixed-design-evidence-attestation/slice-02-craft.md` — applied `none`; declined: arch-review, independent-review, pr-review, scout-pr-review

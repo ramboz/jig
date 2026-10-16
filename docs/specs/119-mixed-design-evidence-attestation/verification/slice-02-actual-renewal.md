@@ -120,7 +120,57 @@ approved source inventory are identical A/B. Operational request-history
 progress is not misclassified as a grading-definition change. The parent
 independently pins B before B's producer result exists.
 
-**Still pending:** authoritative genuine B result and fresh B attestation/
-recording/normal completion. The actual stale-A refusal above does not
-credit restoration, copied mutations, the A pass or an unevaluated
-comment-only change as genuine renewed B acceptance.
+## Genuine B attestation and completion
+
+Actual renewed B run `73e576b5-7c3e-4d91-94f7-63fbc65d95b3` explicitly
+passes the installed overall policy with exit0, all28requiredpass and real
+quality0.9675 against the same frozen0.8 threshold. Exactly eight fresh
+CLI-reported Opus5 answers occupy claims58–65. Cap65 is exhausted; no
+additional run, refrozen budget, changed threshold or Jig rescore repaired B.
+
+The separately preserved parent PRE-RESULT B context is
+`036-44a-baseline-B-independent-context.json`, raw
+`e98ea2cab6eb6969272d98defd8977c4b338a89a19326f913776665a71445a2a`.
+It selected actual current B before the result existed, not from the
+envelope's own current-delivery assertion. Fresh read/hash preparation
+verified all16frozen pins and the whole approved required binding identical
+to A, all3887currentexternalruntime files and all39actualBoutput files.
+The producer's complete audit reports4177comparisons/zero mismatch.
+
+| B artifact | Raw SHA-256 |
+|------------|------------|
+| Actual B receipt | `4468f20dfcd2553d15807bf6fd6b9bd53dc3e3aa3fe717e4586ecb38c3a0eaa5` |
+| Overall gate | `6c07f525e488f2a89d192623000e72d115a170458733e38da289d54e5e9aa0f1` |
+| Component | `67da017bde4d210a7e5c14496a8cc6372d2f7374e9d5704c617b74c4aa114395` |
+| Envelope | `cd21290dfd45f351e8eec583c1e0848fb84b831b9a40c9574ebfff1f13ec0dbc` |
+| Producer full audit | `6977d4aae48c43ca37d295acc0c2952a9b9d65224ff4aec335d537a77ec3be7b` |
+| `J/actual-44a-B/jig-read-hash-audit.json` | `9a0fa27ef51cfa4e9771f81e7779ce07833a022ea011ebe5d17f36d1c48b95bd` |
+| `J/actual-44a-B/context.json` | `c5c1736891c40af2ea588ef3bce63705d077bc373ad0a98e2bdaf88df0c6f42a` |
+| `J/actual-44a-B/bindings.json` | `e0594f15e90758c1123b25a7843228e1f9a4f3debc13098e0ad2cd5b1e18de05` |
+
+The [actual fresh B attester](slice-02-44a-B-attestation.md) passed and
+explicitly authorized its response verbatim followed by the complete reviewed
+binding body, plus the B selector **after** preserving the old-A refusal.
+Only then did ordinary `record-review` replace the existing design-review
+artifact with genuine B evidence. The archived A body/context/receipt and
+earlier refusal trace remain unchanged; this legitimate renewal does not
+rewrite history or silently approve a different inventory.
+
+`J/record-actual-B.py` records the fresh B pass, runs `check-reviews`, then
+normal REVIEWED/RECONCILED/DONE on the **same** isolated fixture. All five
+commands exit0. Trace `J/actual-44a-B/record-check-completion.json`, raw
+`00318c767786b02817037e71433e32a899cb0acce86087e28642d3fde6d1430c`,
+retains the previous refusal hash, original A snapshot hash, selected B
+context, exact commands and current B record raw
+`912eada90b53e51c26707e8cb4cb6f3563a987b2b44ad8340056ed72f1acd73c`.
+
+Together the actual A/B rail contains14CLI observations: six initial-A
+successes, three unchanged-A freshness refusals after actual B delivery, and
+five renewed-B successes. The three initial non-design review artifacts are
+explicitly synthetic harness preconditions, not app-review verdicts.
+No Jig application input mutation, producer/evaluator/judge call, byte
+restoration, mirror or manufactured producer grade is credited as AC5.
+
+This resolves the draft checkpoint's genuine-renewal acceptance gap.
+The isolated fixture's DONE is still distinct from whole11902 review/
+reconciliation/DONE, which must pass its own normal helpers.

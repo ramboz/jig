@@ -48,8 +48,9 @@ slice record. Old nonpassing records are preserved; no119-02/03
 implementation is claimed.
 
 119-01 closed through normal REVIEWED, RECONCILED and DONE evidence/dependency
-gates. The spec remains IN_PROGRESS because119-02/03 remain DRAFT; no
-compress-on-spec-close primer change applies.
+gates. At that checkpoint119-02/03 were DRAFT. Current119-02 state is in its
+own record;119-03 remains DRAFT, so no compress-on-spec-close primer change
+applies.
 
 ## 119-02 — freshness through final delivery
 
@@ -59,7 +60,7 @@ compress-on-spec-close primer change applies.
   reuse of a previously passing review at DONE without a back-edge.
 - [x] Narrowly add source/target, effective policy/config and app/delivery
   reference/digest checks to existing design-review evidence validation.
-- [ ] Exercise genuine A/B/renewed runs and dirty/config/approval changes;
+- [x] Exercise genuine A/B/renewed runs and dirty/config/approval changes;
   preserve documentation-only application identity.
 - [ ] Record trust limits, validate, review, reconcile and close the slice.
 
@@ -68,10 +69,13 @@ read/hash reuse proof pass. Twelvecopied changes yield36specific refusals in
 72actualCLIobservations with unchanged pass/GitHEAD/size/mtime; restoration and
 outside-closure documentation change clear. All3887currentexternalruntime
 files and39copiedoutputfiles rehashed. Genuine changed-build renewal, not
-restoration, remains AC5; see `verification/slice-02-freshness-proof.md`.
+restoration, is now separately proved by the actual44a A/B sequence in
+`verification/slice-02-actual-renewal.md`; the old checkpoint gap is preserved
+as history, not waived.
 The compliance-discovered root-NUL diagnostic bug is fixed with witnessed
 red/green recording/reuse regressions; final genuine mutation proof was
-repeated on that exact guard source. Full ordered reviews remain gated by AC5.
+repeated on that exact guard source. Fresh full ordered reviews now judge all
+completed acceptance evidence before actual11902 closure.
 
 ## 119-03 — bounded legacy and opt-in preservation
 

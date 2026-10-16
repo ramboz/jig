@@ -365,18 +365,25 @@ class DesignFreshnessTests(unittest.TestCase):
     def test_run_links_refuse_foreign_run_and_missing_or_partial_output(self):
         component_path = self.f.evidence / "component.json"
         original = json.loads(component_path.read_text())
-        for change in (
-            {"run_id": "foreign-run"},
-            {"evidence": []},
-            {"evidence": [{"result_artifact": {}}]},
+        overall = json.loads((self.f.evidence / "overall.json").read_text())
+        for change, diagnostic in (
+            ({"run_id": "foreign-run"}, "component"),
+            ({"evidence": []}, "component evidence"),
+            ({"evidence": [{"result_artifact": {}}]}, "component result_artifact"),
         ):
             component = {**original, **change}
             self.f.put("evidence", "component.json", component)
             self.f.bindings["records"]["component"] = self.f.ref("evidence", "component.json")
+            overall["components"][0]["result"]["hash"] = digest(component_path)
+            self.f.put("evidence", "overall.json", overall)
+            self.f.bindings["records"]["overall"] = self.f.ref("evidence", "overall.json")
             self.f.verdict("design-review", self.f.body())
-            self.assert_refuses("component")
+            self.assert_refuses(diagnostic)
         self.f.put("evidence", "component.json", original)
         self.f.bindings["records"]["component"] = self.f.ref("evidence", "component.json")
+        overall["components"][0]["result"]["hash"] = digest(component_path)
+        self.f.put("evidence", "overall.json", overall)
+        self.f.bindings["records"]["overall"] = self.f.ref("evidence", "overall.json")
         self.f.bindings["result_artifact"]["artifacts"] = []
         self.f.verdict("design-review", self.f.body())
         self.assert_refuses("result_artifact")
