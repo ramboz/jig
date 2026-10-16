@@ -391,8 +391,28 @@ and REVIEWED — two always-on, two gated on slice frontmatter flags.
    per-slice review carries a real context cost; it defaults off.
 
 Order: compliance → craft → (arch if `arch_review: true`) → (code-health
-if `code_health_review: true`). All required passes must `pass` for the
-IN_PROGRESS → REVIEWED transition.
+if `code_health_review: true`) → (design-review if `design_review: true`).
+All required passes must `pass` for the IN_PROGRESS → REVIEWED transition.
+
+**Design-review is read/hash-only attestation, not evaluation**
+([ADR-0065](decisions/adr-0065-attest-external-policy-verdict-delivered-revision.md)).
+The slice body/deliverables explicitly select a supported pinned contract and
+name approval, frozen policy/config, independently selected current delivery
+and preserved evidence references. Rich/mixed contracts require the installed
+overall gate-payload policy verdict, including quality, every policy-required
+condition conclusively passing, and consistent gate/component/envelope/output
+tree run/raw-byte digests. Verify approved source/target, effective policy/config
+and evaluated/served build versus independent delivery inputs/bytes. A high
+composite or component pass is insufficient; missing/unknown/error/unsupported
+or contradictory evidence cannot clear. Optional outcomes follow the approved
+producer policy. No evaluator call/import, recapture, rescoring, invented
+thresholds or default contract discovery. Explicit legacy threshold-only policy
+keeps its scalar rule with new-attestation provenance, never a rich fallback;
+historical/unflagged behavior is unchanged. See
+[the procedure and producer pins](../skills/independent-review/SKILL.md#design-review-attest-only-pass--adr-0022--adr-0065-on-demand).
+The attester's body retains comparisons/reasons; existing recorded verdicts
+gate REVIEWED/DONE. Automatic persisted freshness revalidation is **119-02**,
+not part of the 119-01 prompt change; independent compliance is not replaced.
 
 The reviewer's isolation is prompt- and tool-scoped — a self-contained
 prompt plus read-only tools — not a hard sandbox (parent context is
@@ -404,12 +424,12 @@ technically reachable; see `skills/independent-review/SKILL.md`
 Each pass produces a **durable verdict artifact**, not ephemeral chat.
 After a pass returns, record its verdict with `review.py record-review`,
 which writes `docs/specs/NNN-slug/reviews/slice-NN-<pass>.md`
-(`<pass>` ∈ `compliance` / `craft` / `arch` / `code-health` /
+(`<pass>` ∈ `compliance` / `craft` / `arch` / `code-health` / `design-review` /
 `reconciliation`; the schema lives in
 `skills/_common/review_evidence.py`). The end-to-end enforced path is:
 
-1. **Build the prompt** — `review.py implementation|pr-review|arch-review`
-   (compliance / craft / arch) builds the reviewer prompt; Claude spawns
+1. **Build the prompt** — `review.py implementation|pr-review|arch-review|design-review`
+   (compliance / craft / arch / design attestation) builds the reviewer prompt; Claude spawns
    the reviewer subagent.
 2. **Record the verdict** — `review.py record-review … --pass <pass>
    --verdict pass|fail|needs-changes --summary-file <path> …` writes the
@@ -420,7 +440,8 @@ which writes `docs/specs/NNN-slug/reviews/slice-NN-<pass>.md`
    <slice> REVIEWED`. The helper imports the same validator and **refuses**
    the move unless `compliance` + `craft` (+ `arch` when the slice
    declares `arch_review: true`, + `code-health` when it declares
-   `code_health_review: true`) all exist and carry `verdict: pass`. A
+   `code_health_review: true`, + `design-review` when it declares
+   `design_review: true`) all exist and carry `verdict: pass`. A
    refusal names the missing/invalid artifact and the `record-review`
    command to produce it. (`review.py check-reviews … --stage REVIEWED`
    runs the same check ahead of the transition.)

@@ -1,5 +1,5 @@
 ---
-status: DRAFT
+status: IN_PROGRESS
 skill: spec-workflow
 use_cases: [UC-4, UC-7, UC-20]
 ---
@@ -11,7 +11,11 @@ use_cases: [UC-4, UC-7, UC-20]
 > Follow-on to DONE specs [071](../071-design-review-pass/spec.md) and
 > [104](../104-design-fidelity-routing/spec.md), proposing
 > [ADR-0065](../../decisions/adr-0065-attest-external-policy-verdict-delivered-revision.md).
-> DRAFT only: source implementation has not started.
+> Implementation checkpoint: ADR-0065/C0 are accepted; 119-01 passed
+> independent framing and spec-readiness reviews. See [plan.md](plan.md).
+> 119-02/03 remain DRAFT. Genuine sealed-epoch evidence is now recorded in
+> [verification/sealed-proof.md](verification/sealed-proof.md); the slice
+> frontmatter/status board is the live lifecycle source.
 >
 > Allocated on 2026-10-14 by installed `workflow.py new --no-push`.
 > Number 119 is provisional on this proposal branch because main requires a PR.
@@ -187,15 +191,22 @@ absence of provenance must not silently weaken a rich-required contract.
 
 ### Cross-repo prerequisites and pilot boundary
 
+The table records proposal-era ownership, with draft-owner labels retained
+as historical references. Accepted C0 and the published, independently read
+C1/producer contract pins are now in [plan.md](plan.md). Genuine final-current
+119-01 proof is in [verification/sealed-proof.md](verification/sealed-proof.md);
+its actual review records and slice frontmatter carry the live lifecycle state.
+
 | Owner | Shared checkpoint / implementation responsibility | Reported draft owner |
 |-------|---------------------------------------------------|----------------------|
 | Vellum (`PinkException/vellum`) | C1 in 013-01 IN_PROGRESS prepares approved normal/open source captures/inputs and mapping; it unblocks downstream observer/consumer use without claiming driven-state handoff DONE or 013-02 completion. | ADR-0011 and [spec 013](https://github.com/PinkException/vellum/blob/vellum-oracle-contract/docs/specs/013-design-to-oracle-handoff/spec.md). |
 | Servo (`ramboz/servo`) | 035-01 standalone overall policy first; 036-01 then implements observation and proves served-build binding against C1 input. Pin distinct gate/envelope/config revisions at C0. | ADR-0044, [composition spec 035](https://github.com/ramboz/servo/blob/servo-required-design-evidence/docs/specs/035-required-evidence-alongside-quality-scores/spec.md) and [envelope spec 036](https://github.com/ramboz/servo/blob/servo-required-design-evidence/docs/specs/036-deterministic-design-evidence/spec.md). |
 | Pilot/build owner (parent-coordinated) | Define current/served/delivered-build input closure predicates and independent delivery reference at C0; execute genuine baseline/failure, substitution/replay and binding scenarios during implementation. | Small self-contained fixture planned; no real-world app supplied. |
-| Jig | Later ADR acceptance/readiness authority and C0 authority/identity contracts precede implementation; genuine producer-backed completion/refusal proof is in each slice's AC/DoD, using C1 inputs. | This turn remains Proposed/DRAFT. |
+| Jig | ADR acceptance/readiness authority and C0 authority/identity contracts precede implementation; genuine producer-backed completion/refusal proof is in each slice's AC/DoD, using C1 inputs. | Accepted ADR-0065/C0; 119-01 has sealed proof and final passing implementation reviews; see its slice record for lifecycle. 119-02/03 remain DRAFT. |
 
-Sibling links are coordinator-reported draft references; publication, immutable
-revisions and alignment are not independently verified here. The proposed
+At proposal authoring, sibling links were coordinator-reported draft references,
+not independent verification of publication or alignment. The implementation
+checkpoint now pins the actual published references separately. The proposed
 acyclic start order is **Servo 035-01 standalone -> Vellum 013-01 IN_PROGRESS
 C1 source/input checkpoint -> Servo 036-01 real observer/served-build proof ->
 Jig 119-01/02 attestation -> Vellum 013-01 closes and 013-02 state integration**.
@@ -203,8 +214,9 @@ These are named coordination checkpoints, not dependencies on entire sibling
 specs being DONE. **C0** means accepted/aligned decisions, exact input
 serialization/version/digest domains/test vectors, explicit required matrix
 and served/current/delivered-build closure predicates, with no demand for
-runnable consumer code. None of C0's concrete tolerance/transport choices is
-owner-approved yet. Runtime scenarios, substitution/replay proof and genuine
+runnable consumer code. The owner's accepted ADR/C0 grant now approves the
+bounded pilot choices, not future completion evidence. Runtime scenarios,
+substitution/replay proof and genuine
 frozen captures are produced and verified during the owning implementation
 AC/DoD, not a demand for finished integration before starting. C1's preparation
 of an open-state source capture is not 013-02's driven-state integration.
@@ -282,7 +294,11 @@ documentation and a producer-backed scenario, not a parser-only phase.
 - [119-02 — reject-stale-delivery](slice-02-reject-stale-delivery.md)
 - [119-03 — legacy-and-opt-in](slice-03-legacy-and-opt-in.md)
 
-## Authoring review and implementation stop
+## Historical authoring review and implementation stop
+
+The paragraph below records the proposal-era stop. The accepted ADR and
+2026-10-15 [implementation checkpoint](plan.md) now govern 119-01 readiness;
+this does not credit its unexecuted acceptance scenarios.
 
 All slices stay DRAFT; no DoD item is represented as complete. Independent
 frame-critique evidence belongs in `reviews/` and the ADR's sibling review

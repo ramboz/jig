@@ -55,20 +55,16 @@ every slice may run:
   architecture-shaped concerns; the slice template at
   `templates/docs/specs/slice-template.md` ships the field commented
   out as a discoverability nudge.
-- **Design-review (attest-only pass — on-demand)** — slice 071-01 /
-  ADR-0022. After the craft (+ arch) passes, the orchestrator queries the
+- **Design-review (attest-only pass — on-demand)** — slices 071-01/119-01,
+  ADR-0022/ADR-0065. After the craft (+ arch) passes, the orchestrator queries the
   slice's `design_review:` flag via `workflow.py design-review-needed`;
   when `true`, it runs an **attest-only** pass: the read-only reviewer
-  attests an external, non-deterministic design-fidelity eval's frozen
-  verdict (e.g. servo's `.servo/design-eval/` composite ≥ its own
-  threshold, non-stale, `env_error` ≠ pass) and records pass/fail — it
-  never re-runs or re-derives the score (servo runs/scores, jig attests).
-  Gates REVIEWED like arch. Authors set `design_review: true` when the
-  slice ships UI gated by an external design-fidelity eval — and the slice
-  body must point at **where the eval evidence lives** (the frozen config +
-  threshold and the results ledger), since the reviewer can only attest a
-  verdict it can locate; with no pointer it has nothing to read and records
-  a `fail`.
+  attests the explicitly selected external policy and its frozen evidence.
+  Rich/mixed evidence requires the installed overall gate-payload verdict,
+  including quality, complete required outcomes and source/config/delivery
+  bindings; a component pass or high composite is insufficient. No evaluator
+  execution or rescoring. Gates REVIEWED like arch; the slice body/deliverables
+  must name the contract and separate comparison/evidence references below.
 - **Reconciliation review** — after the deviation log is written. The
   reviewer verifies the doc changes match reality; does NOT re-review the ACs.
 
@@ -222,20 +218,75 @@ run frame-critique **equal-or-stronger** than the artifact's author —
 depth). 064-03 ships rung-1 (fresh-context subagent) independence;
 cross-model (rung-3) is deferred (`docs/refinement-todo.md`).
 
-### Design-review (attest-only pass — slice 071-01 / ADR-0022, on-demand)
+### Design-review (attest-only pass — ADR-0022 / ADR-0065, on-demand)
 
-Unlike every other pass, design-review produces no judgment of its own — it
-**attests** an *external, non-deterministic* eval's frozen verdict. The eval
-(e.g. servo's design-fidelity oracle) is the thing that RUNS the UI and SCORES
-it against a frozen design definition; this pass's read-only reviewer confirms,
-by reading the recorded eval evidence, that the eval actually **RAN**, is
-**NON-STALE** (its frozen config/threshold unchanged since the run), is
-**HONEST** (an `env_error` / infra failure is **not** a pass and **not** a
-0.0), and that the latest composite is **≥ the eval's own declared threshold** —
-then RECORDS that verdict. It **never re-runs, re-derives, or re-judges** the
-score: servo runs and scores, jig attests (the ADR-0022 honesty boundary). It
-runs only when the slice declares a truthy `design_review` flag, and gates
-REVIEWED exactly like `arch`.
+The producer runs/scores; Jig **attests** preserved evidence, whether
+deterministic or mixed. Run only for a truthy `design_review` flag. In the
+slice body/deliverables, explicitly name the supported producer contract,
+approval, frozen effective policy/config, **independently selected current
+delivery**, overall result and subordinate evidence references. No new
+frontmatter, automatic contract discovery or guessed version mapping.
+
+For a rich/mixed contract, require **all** of:
+
+- Readable separately pinned Vellum input-contract, Servo overall gate-payload,
+  design-evidence-envelope and design-eval configuration (when used).
+- An identifiable, completed honest run. Preserve invocation/acquisition
+  claim/receipt and served response/output closure; `env_error`/infra failure
+  is not pass or a 0.0 score.
+- Matching currently approved source snapshot/target and approval authority;
+  frozen effective policy/config, inventory, checks/evaluator and judge
+  settings; evaluated/served build versus independent delivery enumeration
+  and bytes. Compare source revision **and dirty-input digest**, effective
+  build/runtime inputs, config, assets and dependencies under the build-owner's
+  declared closure/digest domains. A Git SHA, URL, timestamp, or the result's
+  own `current_delivery` assertion is insufficient.
+- The installed overall gate-payload policy verdict explicitly passes,
+  including quality. Check every required condition against the **pinned policy
+  inventory**, not just present result rows. Required missing/unknown/not-run/
+  inconclusive/environment-error outcomes, unavailable comparisons, unsupported
+  versions and contradictions cannot clear. Optional outcomes follow the
+  approved producer policy, not an extra Jig veto.
+- Gate/component/envelope/complete output-tree run and raw-byte digest
+  consistency. A deterministic component pass with overall quality failure,
+  or an overall pass contradicting required/quality failure, is non-clearing.
+  Never average away a failure or repair a contradiction by rescoring.
+
+**Pinned pilot seam (producer-owned, not a Jig schema):**
+[Servo 036 plan at 6cc759e807cab5411363b44c19c58e7a457b3715](https://github.com/ramboz/servo/blob/6cc759e807cab5411363b44c19c58e7a457b3715/docs/specs/036-deterministic-design-evidence/plan.md).
+The supported combination is `vellum-design-input/0.1-pilot`, overall
+`gate_result` integer `schema_version: 2`, `required_component_result` v1,
+`command_result_artifacts` v1, subordinate `design_evidence` v1, and separately
+pinned design-eval configuration revision 2 when used.
+Read `.servo/required-policy.json` and its approved installed pin. The overall
+`components[].result.{path,hash}` binds exact component bytes; the component's
+raw `evidence[].result_artifact` binds the envelope and complete capture tree.
+Check the command artifact record's run-scoped root, manifest and complete
+sorted inventory. Artifact references use **raw-byte SHA-256**, not reserialized
+JSON; semantic identities retain their separate producer digest domains.
+The final installed `oracle.sh` execution wrapper is part of the approved
+evaluator-artifact closure; compare its exact bytes and the independently
+selected raw approved checks. Follow every declared nested runtime file,
+not just its manifest hash. Prepared-definition and staged-driver approval
+records precede the separately pinned final approved installation.
+Approved normal/open C1 packages are at
+[Vellum 55dd18007cd5664be17c1e7c4666fd1f00dd93d6](https://github.com/PinkException/vellum/tree/55dd18007cd5664be17c1e7c4666fd1f00dd93d6/plugin/skills/build-to-redline/fixtures/approved-card/c1/release-r3/).
+[119's checkpoint](../../docs/specs/119-mixed-design-evidence-attestation/plan.md#pinned-producer-evidence-contract)
+preserves the release/approval byte pins and fixture-scoped approval limits;
+source approval is not candidate-delivery acceptance.
+
+Reading/hashing (or reading a preserved pure read/hash audit with its invocation
+and digest domains) is allowed; invoking/importing the evaluator, recapturing,
+rescoring, recomputing weighted scores or inventing thresholds is not.
+Unsigned local hashes establish consistency, not honest execution against an
+actor able to rewrite all records. Compliance remains independent.
+
+Only an **explicitly selected legacy threshold-only policy** uses the original
+higher-is-better composite ≥ its own frozen threshold, with honest execution
+and the same source/config/delivery bindings for new attestations. Historical
+records and unflagged/default behavior stay unchanged. Missing rich fields
+never select a scalar fallback; component-envelope v1 is not legacy
+gate-payload v1. Unsupported/ambiguous or unbound evidence needs renewal.
 
 ```bash
 PROMPT=$(python3 "$JIG_ROOT/skills/independent-review/review.py" \
@@ -246,14 +297,16 @@ PROMPT=$(python3 "$JIG_ROOT/skills/independent-review/review.py" \
 ```
 
 Record the verdict as the `design-review` pass; the `REVIEWED` gate requires it
-iff `design_review` is truthy (default-off slices transition freely). Although
-the shared envelope offers `pass | fail | needs-changes`, an attestation is
-binary — the recorded eval verdict either attests (honest, non-stale, meets its
-threshold) or it does not — so this pass meaningfully emits only `pass` / `fail`
-(the gate clears on `pass` and blocks on either of the others). **No
-richer-skill detection** — there is no external "design-review" skill category;
-the pass attests jig's own eval evidence. First consumer: food-log slice 002-01
-(servo design-fidelity eval).
+iff `design_review` is truthy; DONE rechecks the recorded verdict alongside
+the other required reviews. The generated envelope preserves named versions,
+gate/component run IDs, paths/raw digests, both sides of all three identity
+comparisons, policy inventory/outcomes and producer refusal reasons. Keep
+these in the `record-review` body, including on `fail`/`needs-changes`; only
+`pass` clears. Compliance/craft/conditional reviews/reconciliation still apply.
+This is a prompt/attester boundary, not an executable producer parser:
+automatic persisted-pass freshness revalidation belongs to **119-02** and is
+not supplied by 119-01. **No richer-skill detection** — there is no external
+"design-review" skill category.
 
 > The `design_review` flag is set **by hand** on a slice/spec whose deliverable
 > is validated by an external design-fidelity eval — there is **no** mechanical

@@ -1477,3 +1477,9 @@ should store its marker at repository scope (`semantic_index.suggestion_state_pa
 and offer a tracked opt-out. Test both with a real `git worktree add`, not one
 directory run twice. Suggestion text an agent reads should also say *who*
 acts and *where*: "Install it" invites an in-sandbox install attempt.
+
+## Attestation hashes need independently pinned transitive closure
+119-01 fresh attestation refused a genuine overall-pass run even though 175 supplied hash comparisons matched: the audit omitted raw checks.json against its separately selected pin and nested executable/browser/package references behind runtime-files.json. A manifest digest is not proof that its entire executable closure was checked. Independently select source/approval/policy/config/build/delivery context, preserve exact raw versus semantic digest domains, traverse declared transitive references, and keep nonpassing verdicts/IN_PROGRESS when closure or final producer epoch is incomplete. Do not repair old pins, recompute a score or call a producer from Jig. See docs/specs/119-mixed-design-evidence-attestation/verification/checkpoint.md.
+
+## Passing attestation records must retain their comparison inputs
+119-01 final compliance found two evidence defects even with genuine sealed runs: a generic positive reviewer reply omitted exact contract/context/audit/inventory/delivery references from the recorded body, and a required-failure DONE witness also had unrelated missing reconciliation subsections. Obtain a reviewer-authored provenance-complete addendum (do not fill in a positive judgment yourself), preserve prior replies/traces, complete disposable fixture prerequisites, and repeat the attributable refusal. See docs/specs/119-mixed-design-evidence-attestation/verification/sealed-proof.md.

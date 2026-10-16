@@ -2126,6 +2126,113 @@ class DesignReviewPromptTests(unittest.TestCase):
     def test_includes_slice_label(self):
         self.assertIn("071-01", self._prompt())
 
+    def test_rich_policy_uses_overall_authority_and_separate_versions(self):
+        """119-01 AC1: instruction contract, not producer runtime proof."""
+        prompt = normalize_ws(self._prompt())
+        for instruction in (
+            "explicitly selected supported rich/mixed contract",
+            "installed overall gate-payload",
+            "including quality",
+            "Deterministic and mixed evidence",
+            "Vellum input-contract",
+            "design-evidence-envelope",
+            "gate-payload",
+            "design-eval configuration",
+            "separately pinned",
+        ):
+            with self.subTest(instruction=instruction):
+                self.assertTrue(instruction in prompt, f"missing: {instruction}")
+        self.assertTrue("do not invoke or import the evaluator" in prompt)
+        self.assertTrue("do not replace compliance" in prompt)
+
+    def test_rich_attestation_envelope_records_independent_bindings(self):
+        """119-01 AC2 prompt support; genuine positive run remains external."""
+        prompt = self._prompt()
+        envelope = prompt.split("## Output (required", 1)[1]
+        for marker in (
+            "CONTRACTS:", "REFERENCES:", "BINDINGS:", "OVERALL-POLICY:",
+            "REQUIRED-OUTCOMES:", "CONSISTENCY:", "REASONS:",
+        ):
+            self.assertTrue(marker in envelope, f"missing envelope: {marker}")
+        text = normalize_ws(prompt)
+        for instruction in (
+            "approved source snapshot and target",
+            "frozen effective policy/config",
+            "independently selected current delivery",
+            "source revision and dirty-input digest",
+            "build/runtime inputs, config, assets and dependencies",
+            "evaluated/served build",
+            "acquisition claim/receipt",
+            "not copied from the result or its own run manifest",
+            "Git SHA, URL or timestamp alone is insufficient",
+            "hashes do not prove honest execution",
+        ):
+            with self.subTest(instruction=instruction):
+                self.assertTrue(instruction in text, f"missing: {instruction}")
+
+    def test_rich_required_failure_cannot_be_averaged_away(self):
+        """119-01 AC3: no replacement composite or contradiction repair."""
+        prompt = normalize_ws(self._prompt())
+        for instruction in (
+            "high composite never overrides a required failure",
+            "overall pass contradicting a required failure is non-clearing",
+            "do not compute a replacement composite",
+        ):
+            with self.subTest(instruction=instruction):
+                self.assertTrue(instruction in prompt, f"missing: {instruction}")
+
+    def test_rich_inventory_and_raw_artifact_consistency_fail_closed(self):
+        """119-01 AC4: prompt semantics, not an executable producer adapter."""
+        prompt = normalize_ws(self._prompt())
+        for instruction in (
+            ".servo/required-policy.json",
+            "not just the rows present in the result",
+            "missing, unknown, not-run, inconclusive or env_error",
+            "unreadable records, unsupported namespaced versions",
+            "absent explicit overall verdict",
+            "missing/mismatched subordinate run or digest",
+            "Optional outcomes follow the approved producer policy",
+            "components[].result.",
+            "evidence[].result_artifact",
+            "raw-byte SHA-256, not reserialized JSON",
+            "complete sorted artifact inventory",
+            "command_result_artifacts",
+            "required_component_result",
+            "same gate run_id",
+        ):
+            with self.subTest(instruction=instruction):
+                self.assertTrue(instruction in prompt, f"missing: {instruction}")
+
+    def test_rich_contract_selection_is_explicit_without_legacy_fallback(self):
+        """119-01 AC5: references are inputs, not discovery or new flags."""
+        refs = ("contracts/producer.md", "approval/release.json",
+                "policy/frozen.json", "delivery/current.json",
+                "evidence/gate.json")
+        prompt = normalize_ws(self._prompt(*refs))
+        for ref in refs:
+            self.assertTrue(f"`{ref}`" in prompt, f"missing ref: {ref}")
+        for instruction in (
+            "No automatic contract discovery",
+            "missing rich fields never select a scalar fallback",
+            "component-envelope v1 does not select legacy gate-payload v1",
+            "Unsupported or ambiguous contract identity is non-clearing",
+            "Compliance, craft and reconciliation remain independently required",
+        ):
+            with self.subTest(instruction=instruction):
+                self.assertTrue(instruction in prompt, f"missing: {instruction}")
+
+    def test_component_pass_cannot_clear_overall_quality_failure(self):
+        """119-01 AC6 instructions; no claim of a genuine quality control."""
+        prompt = normalize_ws(self._prompt())
+        for instruction in (
+            "component pass with overall quality failure is non-clearing",
+            "overall pass contradicting a quality failure is non-clearing",
+            "cite the preserved overall quality failure",
+            "Do not rerun or rescore to repair contradictions",
+        ):
+            with self.subTest(instruction=instruction):
+                self.assertTrue(instruction in prompt, f"missing: {instruction}")
+
     # AC1 — no richer-skill detection (no standard external category).
     def test_no_richer_skill_detection(self):
         prompt = self._prompt()
@@ -2163,14 +2270,15 @@ class DesignReviewEvidenceRoundTripTests(unittest.TestCase):
         import shutil
         shutil.rmtree(self.tmp, ignore_errors=True)
 
-    def _record(self, spec, slice_frag, pass_name, verdict):
+    def _record(self, spec, slice_frag, pass_name, verdict, body=None):
         return subprocess.run(
             [sys.executable, str(REVIEW), "record-review",
              str(spec), slice_frag, "--pass", pass_name,
              "--verdict", verdict, "--reviewer", "jig:reviewer",
              "--prompt-source", "review.py design-review x",
              "--summary-file", "-"],
-            input="## VERDICT\n" + verdict + "\n", capture_output=True,
+            input=body if body is not None else "## VERDICT\n" + verdict + "\n",
+            capture_output=True,
             text=True, env={**os.environ, "CLAUDE_PLUGIN_ROOT": str(REPO_ROOT)},
         )
 
@@ -2217,6 +2325,169 @@ class DesignReviewEvidenceRoundTripTests(unittest.TestCase):
         self._record(spec, "0XX-01", "craft", "pass")
         r = self._check(spec, "0XX-01")
         self.assertEqual(r.returncode, 0, f"stderr: {r.stderr}")
+
+    def _rich_fixture(self, name):
+        """Synthetic attester output only, NOT producer execution/proof."""
+        spec = _make_spec_with_slice(
+            self.tmp / name, "01", "foo", arch_review=True, design_review=True)
+        slice_path = spec.parent / "slice-01-foo.md"
+        slice_path.write_text(slice_path.read_text() + """
+Selected contract: `contracts/servo-pilot.md` (rich/mixed).
+Approval: `approval/release.json`; frozen policy: `policy/required-policy.json`.
+Independent current delivery: `delivery/current.json`.
+Evidence: `evidence/gate.json`, `evidence/component.json`, `evidence/tree.json`.
+All references in this fixture are synthetic; no runtime proof is asserted.
+
+### Deviation log (after reconciliation)
+Synthetic CLI rail fixture only.
+
+### Reconciliation sweep
+| Artifact | Disposition | Rationale |
+|----------|-------------|-----------|
+| `README.md` | `no-op` | Synthetic fixture, no product change. |
+""")
+        return spec, slice_path
+
+    def _attester_body(self, verdict, reason):
+        """Handwritten output exercises preservation, never a producer parser."""
+        return f"""VERDICT: {verdict}
+SUMMARY: SYNTHETIC unit verdict, not genuine producer runtime evidence.
+CONTRACTS: contracts/servo-pilot.md; Vellum input-contract vellum-design-input/0.1-pilot;
+ design-evidence-envelope v1; gate-payload v2; design-eval configuration revision 2.
+REFERENCES: approval/release.json; policy/required-policy.json; delivery/current.json;
+ evidence/gate.json run=synthetic-run; evidence/component.json run=synthetic-run;
+ evidence/tree.json raw-byte SHA-256=synthetic-tree-digest.
+EVAL-RAN: synthetic completed-run assertion only.
+NON-STALE: synthetic frozen policy/config comparison only.
+BINDINGS: synthetic approved source/target, policy/config and evaluated/served
+ build versus independently selected delivery/current.json.
+OVERALL-POLICY: {reason}
+REQUIRED-OUTCOMES: policy inventory; required #title; {reason}
+CONSISTENCY: gate/component/envelope/tree references retained, not runtime verified.
+THRESHOLD-MET: supporting composite 0.95 >= 0.8 never overrides required/quality failure.
+REASONS: {reason}; run=synthetic-run; evidence/gate.json.
+"""
+
+    def _transition(self, spec, stage):
+        return subprocess.run(
+            [sys.executable,
+             str(REPO_ROOT / "skills/spec-workflow/workflow.py"),
+             "transition", str(spec), "0XX-01", stage],
+            capture_output=True, text=True,
+            env={**os.environ, "CLAUDE_PLUGIN_ROOT": str(REPO_ROOT),
+                 "JIG_REVIEW_EVIDENCE_GATE": "1"},
+        )
+
+    def test_synthetic_rich_pass_needs_other_reviews_and_reconciliation(self):
+        """119-01 AC2/5 rail support, not genuine baseline acceptance."""
+        spec, slice_path = self._rich_fixture("rich-pass")
+        body = self._attester_body("pass", "synthetic overall/required/quality pass")
+        r = self._record(spec, "0XX-01", "design-review", "pass", body)
+        self.assertEqual(r.returncode, 0, r.stderr)
+        evidence = spec.parent / "reviews/slice-01-design-review.md"
+        self.assertEqual(evidence.read_text().split("---\n", 2)[2], "\n" + body)
+
+        for pass_name in ("compliance", "craft", "arch"):
+            with self.subTest(required_pass=pass_name):
+                check = self._check(spec, "0XX-01")
+                self.assertEqual(check.returncode, 2, check.stdout)
+                self.assertIn(f"[{pass_name}]", check.stderr)
+                blocked = self._transition(spec, "REVIEWED")
+                self.assertEqual(blocked.returncode, 2, blocked.stderr)
+                self.assertIn(f"[{pass_name}]", blocked.stderr)
+                recorded = self._record(spec, "0XX-01", pass_name, "pass")
+                self.assertEqual(recorded.returncode, 0, recorded.stderr)
+
+        self.assertEqual(self._check(spec, "0XX-01").returncode, 0)
+        reviewed = self._transition(spec, "REVIEWED")
+        self.assertEqual(reviewed.returncode, 0, reviewed.stderr)
+        blocked = self._transition(spec, "RECONCILED")
+        self.assertEqual(blocked.returncode, 2, blocked.stderr)
+        self.assertIn("[reconciliation]", blocked.stderr)
+        rec = self._record(spec, "0XX-01", "reconciliation", "pass")
+        self.assertEqual(rec.returncode, 0, rec.stderr)
+        for stage in ("RECONCILED", "DONE"):
+            r = self._transition(spec, stage)
+            self.assertEqual(r.returncode, 0, r.stderr)
+            self.assertIn(f"status: {stage}", slice_path.read_text())
+
+    def test_synthetic_nonpassing_design_refuses_reviewed_and_done(self):
+        """119-01 AC3/4/6 verdict rail, NOT genuine producer refusal proof."""
+        reasons = (
+            ("fail", "required #title fail despite composite 0.95 >= 0.8"),
+            ("fail", "overall pass contradicts required #title failure"),
+            ("needs-changes", "required #title missing from policy inventory coverage"),
+            ("needs-changes", "required #title unknown"),
+            ("needs-changes", "required #title not-run"),
+            ("needs-changes", "required #title inconclusive"),
+            ("fail", "required #title env_error: capture unavailable"),
+            ("needs-changes", "unreadable evidence/component.json"),
+            ("needs-changes", "unsupported gate-payload v99"),
+            ("needs-changes", "absent explicit installed overall verdict"),
+            ("needs-changes", "missing subordinate run reference"),
+            ("needs-changes", "mismatched component run_id"),
+            ("needs-changes", "mismatched raw-byte component digest"),
+            ("fail", "component pass; overall quality fail 0.5120652827881754 < 0.8"),
+            ("fail", "overall pass contradicts preserved quality failure"),
+        )
+        for index, (verdict, reason) in enumerate(reasons):
+            with self.subTest(reason=reason):
+                spec, slice_path = self._rich_fixture(f"rich-refusal-{index}")
+                for pass_name in ("compliance", "craft", "arch", "reconciliation"):
+                    r = self._record(spec, "0XX-01", pass_name, "pass")
+                    self.assertEqual(r.returncode, 0, r.stderr)
+                body = self._attester_body(verdict, reason)
+                r = self._record(spec, "0XX-01", "design-review", verdict, body)
+                self.assertEqual(r.returncode, 0, r.stderr)
+                evidence = spec.parent / "reviews/slice-01-design-review.md"
+                self.assertEqual(evidence.read_text().split("---\n", 2)[2], "\n" + body)
+                check = self._check(spec, "0XX-01")
+                self.assertEqual(check.returncode, 2, check.stdout)
+                self.assertIn("[design-review]", check.stderr)
+                for stage, old_status in (
+                    ("REVIEWED", "IN_PROGRESS"), ("DONE", "RECONCILED"),
+                ):
+                    # Labelled status mutation tests DONE's recheck without
+                    # pretending a nonpassing review ever cleared REVIEWED.
+                    slice_path.write_text(slice_path.read_text().replace(
+                        "status: IN_PROGRESS", f"status: {old_status}"))
+                    blocked = self._transition(spec, stage)
+                    self.assertEqual(blocked.returncode, 2, blocked.stderr)
+                    self.assertIn("[design-review]", blocked.stderr)
+                    self.assertIn("slice-01-design-review.md", blocked.stderr)
+                    self.assertIn(f"verdict is '{verdict}'", blocked.stderr)
+                    self.assertIn(f"status: {old_status}", slice_path.read_text())
+
+
+class RichDesignReviewGuidanceTests(unittest.TestCase):
+    """119-01 AC5: directly related live guidance matches the prompt."""
+
+    def test_live_guidance_uses_overall_policy_and_bounded_rail(self):
+        for path in (SKILL_MD, REPO_ROOT / "docs/workflow.md"):
+            with self.subTest(path=path):
+                text = normalize_ws(path.read_text())
+                for instruction in (
+                    "installed overall gate-payload",
+                    "including quality",
+                    "independently selected current delivery",
+                    "119-02",
+                ):
+                    self.assertTrue(instruction in text, f"{path}: missing {instruction}")
+
+    def test_guidance_pins_producer_owned_wire_contract(self):
+        text = normalize_ws(SKILL_MD.read_text())
+        for pin in (
+            "6cc759e807cab5411363b44c19c58e7a457b3715",
+            "55dd18007cd5664be17c1e7c4666fd1f00dd93d6",
+            "vellum-design-input/0.1-pilot",
+            ".servo/required-policy.json",
+            "components[].result.{path,hash}",
+            "evidence[].result_artifact",
+            "command_result_artifacts",
+            "raw-byte SHA-256",
+        ):
+            with self.subTest(pin=pin):
+                self.assertTrue(pin in text, f"missing producer contract pin: {pin}")
 
 
 class FrameCritiqueAdrCliTests(unittest.TestCase):
