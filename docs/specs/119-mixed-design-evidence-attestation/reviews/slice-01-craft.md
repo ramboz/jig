@@ -2,40 +2,36 @@
 slice: 119-01 — attest-rich-policy
 pass: craft
 verdict: pass
-reviewer: jig:reviewer/craft-119-01
-reviewed_at: 2026-10-15T16:48:04Z
-prompt_source: review.py pr-review spec.md 119-01 --richer-skill none; bounded code cut
+reviewer: jig:reviewer/final-craft-119-01
+reviewed_at: 2026-10-15T23:56:47Z
+prompt_source: review.py pr-review --richer-skill pr-review; final sealed proof
 substrate: shown
-applied_skill: none
+applied_skill: pr-review
 shown_candidates: [arch-review:high-confidence, independent-review:high-confidence, pr-review:high-confidence, scout-pr-review:high-confidence, access:speculative, adr-workflow:speculative, agent-development:speculative, analyze:speculative, bug-fix:speculative, build-mcp-app:speculative, build-mcp-server:speculative, build-mcpb:speculative, cardputer-buddy:speculative, clarify:speculative, claude-automation-recommender:speculative, claude-md-improver:speculative, code-health:speculative, command-development:speculative, configure:speculative, contracts:speculative, example-command:speculative, example-skill:speculative, explain:speculative, frontend-design:speculative, hook-development:speculative, m5-onboard:speculative, math-olympiad:speculative, mcp-integration:speculative, memory-sync:speculative, migrate:speculative, orient:speculative, playground:speculative, plugin-settings:speculative, plugin-structure:speculative, project-artifact:speculative, reframe:speculative, scaffold-init:speculative, scout-autotune:speculative, scout-bench-create:speculative, scout-memory-init:speculative, scout-scrum-master:speculative, security-review:speculative, session-report:speculative, skill-creator:speculative, skill-development:speculative, slice-land:speculative, spec-workflow:speculative, tdd-loop:speculative, vision-elicitation:speculative, writing-hookify-rules:speculative]
 ---
 
 VERDICT: pass
 
 REASONING:
-The bounded change stays within prompt construction, attestation output,
-guidance and tests; no blocking correctness issue was found by read-only
-inspection. The prompt distinguishes overall policy authority from component
-success and requires independent bindings, complete required coverage and
-artifact consistency. This is a craft pass only: compliance remains
-needs-changes, genuine current producer proof remains pending, and 119-01
-must stay IN_PROGRESS. Tests were inspected, not executed.
+APPLIED_SKILL: pr-review from .claude/skills/pr-review/SKILL.md, baseline rubric.
+The implementation stays within the existing design-review prompt/envelope,
+tests and directly related guidance; no craft blocker found. New prompt
+assertions meaningfully detect missing rich-policy instructions, while
+genuine producer/fresh-attester evidence is explicitly separated from
+synthetic verdict-rail tests. Read-only craft, not a compliance rerun.
 
 SPECIFIC ISSUES:
-- [nit][impl] skills/independent-review/test_review.py:2415 — The 15 synthetic
-  refusal reasons all inject an already-selected nonpassing verdict into the
-  existing rail; they would still pass with the rich-policy prompt removed.
-  Their synthetic labeling is honest, but these are verdict-rail smoke tests,
-  not semantic refusal coverage; one case per verdict would avoid redundant
-  fixtures.
-- [strength][impl] skills/independent-review/review.py:1548 — Requires the
-  explicit overall pass, rejects required/quality contradictions, and derives
-  required coverage from pinned policy inventory rather than result rows.
-- [strength][impl] skills/independent-review/SKILL.md:287 — Distinguishes
-  attestation detail and verdict enforcement from producer parsing and
-  automatic freshness not supplied by this cut.
+- [nit][impl] skills/independent-review/test_review.py:2416 — Fifteen refusal
+  reasons repeat the same verdict-only validation branches. Representative
+  fail/needs-changes cases retaining body-preservation assertions would
+  preserve rail coverage with fewer CLI subprocesses.
+- [strength][impl] skills/independent-review/review.py:1549 — Overall-policy
+  authority, required inventory and contradiction refusal explicit without
+  reconstructing scores or invoking the producer.
+- [strength][impl] verification/sealed-proof.md:85 — Evidence corrections
+  preserve original replies/traces and distinguish actual executions,
+  copied controls and synthetic unrelated-review prerequisites.
 
 RECONCILIATION NOTES:
-No additional scope deviation found. Preserve prompt/envelope/guidance-only
-boundary and 119-02 deferral; log synthetic lifecycle tests only as rail
-support, never genuine producer acceptance.
+No additional scope deviation. Record test redundancy as nonblocking and
+retain provenance strength. Persisted freshness and broad legacy remain119-02/03.

@@ -28,16 +28,23 @@ pending claims below. 119-02/03 remain outside this implementation.
   deterministic-component-pass/overall-quality-fail tests.
 - [x] Consume authoritative installed overall-gate policy/outcomes and subordinate
   run/digest-bound design evidence in the existing prompt/attestation path.
-- [ ] Produce genuine passing, required-failure and component-pass/quality-fail
+- [x] Produce genuine passing, required-failure and component-pass/quality-fail
   overall/component captures; prove served-build binding, then exercise
   independent review, recording, existing review checks and completion.
 - [ ] Document, validate, review, reconcile and close the vertical slice.
 
-Checkpoint: source/guidance/tests/host packages are implemented, but genuine
+Historical492checkpoint: source/guidance/tests/host packages are implemented, but genuine
 current completion proof remains open. Actual positive attester needs-changes
 and quality-fail attester fail are preserved under `verification/`; existing
 record/check/REVIEWED/DONE refusal was exercised. Compliance needs-changes,
 craft/arch supporting code-cut pass; lifecycle stays IN_PROGRESS.
+
+Later sealed6cc759e evidence now supplies all actual producer-backed
+scenarios, independent full closure and124CLI observations; see
+`verification/sealed-proof.md`. Final passing implementation reviews are
+recorded in `reviews/`; reconciliation and gated closure follow the live
+slice record. Old nonpassing records are preserved; no119-02/03
+implementation is claimed.
 
 ## 119-02 — freshness through final delivery
 

@@ -247,7 +247,7 @@ For a rich/mixed contract, require **all** of:
   Never average away a failure or repair a contradiction by rescoring.
 
 **Pinned pilot seam (producer-owned, not a Jig schema):**
-[Servo 036 plan at 5440b63458bf862d4fe0b19e274db18c38c170aa](https://github.com/ramboz/servo/blob/5440b63458bf862d4fe0b19e274db18c38c170aa/docs/specs/036-deterministic-design-evidence/plan.md).
+[Servo 036 plan at 6cc759e807cab5411363b44c19c58e7a457b3715](https://github.com/ramboz/servo/blob/6cc759e807cab5411363b44c19c58e7a457b3715/docs/specs/036-deterministic-design-evidence/plan.md).
 The supported combination is `vellum-design-input/0.1-pilot`, overall
 `gate_result` integer `schema_version: 2`, `required_component_result` v1,
 `command_result_artifacts` v1, subordinate `design_evidence` v1, and separately
@@ -258,6 +258,11 @@ raw `evidence[].result_artifact` binds the envelope and complete capture tree.
 Check the command artifact record's run-scoped root, manifest and complete
 sorted inventory. Artifact references use **raw-byte SHA-256**, not reserialized
 JSON; semantic identities retain their separate producer digest domains.
+The final installed `oracle.sh` execution wrapper is part of the approved
+evaluator-artifact closure; compare its exact bytes and the independently
+selected raw approved checks. Follow every declared nested runtime file,
+not just its manifest hash. Prepared-definition and staged-driver approval
+records precede the separately pinned final approved installation.
 Approved normal/open C1 packages are at
 [Vellum 55dd18007cd5664be17c1e7c4666fd1f00dd93d6](https://github.com/PinkException/vellum/tree/55dd18007cd5664be17c1e7c4666fd1f00dd93d6/plugin/skills/build-to-redline/fixtures/approved-card/c1/release-r3/).
 [119's checkpoint](../../docs/specs/119-mixed-design-evidence-attestation/plan.md#pinned-producer-evidence-contract)

@@ -1,5 +1,10 @@
 # 119-01 implementation and refusal checkpoint — 2026-10-15
 
+**Historical snapshot at 492f128d.** The records below remain evidence of
+the actual initial nonpassing reviews. Subsequent genuine sealed-epoch
+evidence is recorded in [sealed-proof.md](sealed-proof.md); it resolves the
+named evidence gaps without relabelling or rewriting the old runs.
+
 The source cut is implemented; **the slice is not complete**. It remains
 IN_PROGRESS. Compliance is `needs-changes`; supporting craft and architecture
 reviews pass for the code cut only. No REVIEWED/RECONCILED/DONE move is earned.

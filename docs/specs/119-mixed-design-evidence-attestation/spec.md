@@ -13,7 +13,9 @@ use_cases: [UC-4, UC-7, UC-20]
 > [ADR-0065](../../decisions/adr-0065-attest-external-policy-verdict-delivered-revision.md).
 > Implementation checkpoint: ADR-0065/C0 are accepted; 119-01 passed
 > independent framing and spec-readiness reviews. See [plan.md](plan.md).
-> 119-02/03 remain DRAFT. Completion still requires genuine current evidence.
+> 119-02/03 remain DRAFT. Genuine sealed-epoch evidence is now recorded in
+> [verification/sealed-proof.md](verification/sealed-proof.md); the slice
+> frontmatter/status board is the live lifecycle source.
 >
 > Allocated on 2026-10-14 by installed `workflow.py new --no-push`.
 > Number 119 is provisional on this proposal branch because main requires a PR.
@@ -191,15 +193,16 @@ absence of provenance must not silently weaken a rich-required contract.
 
 The table records proposal-era ownership, with draft-owner labels retained
 as historical references. Accepted C0 and the published, independently read
-C1/producer contract pins are now in [plan.md](plan.md); only the genuine
-final-current proof obligations remain outstanding for 119-01.
+C1/producer contract pins are now in [plan.md](plan.md). Genuine final-current
+119-01 proof is in [verification/sealed-proof.md](verification/sealed-proof.md);
+its actual review records and slice frontmatter carry the live lifecycle state.
 
 | Owner | Shared checkpoint / implementation responsibility | Reported draft owner |
 |-------|---------------------------------------------------|----------------------|
 | Vellum (`PinkException/vellum`) | C1 in 013-01 IN_PROGRESS prepares approved normal/open source captures/inputs and mapping; it unblocks downstream observer/consumer use without claiming driven-state handoff DONE or 013-02 completion. | ADR-0011 and [spec 013](https://github.com/PinkException/vellum/blob/vellum-oracle-contract/docs/specs/013-design-to-oracle-handoff/spec.md). |
 | Servo (`ramboz/servo`) | 035-01 standalone overall policy first; 036-01 then implements observation and proves served-build binding against C1 input. Pin distinct gate/envelope/config revisions at C0. | ADR-0044, [composition spec 035](https://github.com/ramboz/servo/blob/servo-required-design-evidence/docs/specs/035-required-evidence-alongside-quality-scores/spec.md) and [envelope spec 036](https://github.com/ramboz/servo/blob/servo-required-design-evidence/docs/specs/036-deterministic-design-evidence/spec.md). |
 | Pilot/build owner (parent-coordinated) | Define current/served/delivered-build input closure predicates and independent delivery reference at C0; execute genuine baseline/failure, substitution/replay and binding scenarios during implementation. | Small self-contained fixture planned; no real-world app supplied. |
-| Jig | ADR acceptance/readiness authority and C0 authority/identity contracts precede implementation; genuine producer-backed completion/refusal proof is in each slice's AC/DoD, using C1 inputs. | Accepted ADR-0065/C0; 119-01 passed separate readiness and is IN_PROGRESS. 119-02/03 remain DRAFT. |
+| Jig | ADR acceptance/readiness authority and C0 authority/identity contracts precede implementation; genuine producer-backed completion/refusal proof is in each slice's AC/DoD, using C1 inputs. | Accepted ADR-0065/C0; 119-01 has sealed proof and final passing implementation reviews; see its slice record for lifecycle. 119-02/03 remain DRAFT. |
 
 At proposal authoring, sibling links were coordinator-reported draft references,
 not independent verification of publication or alignment. The implementation

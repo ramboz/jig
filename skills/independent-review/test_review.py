@@ -2477,7 +2477,7 @@ class RichDesignReviewGuidanceTests(unittest.TestCase):
     def test_guidance_pins_producer_owned_wire_contract(self):
         text = normalize_ws(SKILL_MD.read_text())
         for pin in (
-            "5440b63458bf862d4fe0b19e274db18c38c170aa",
+            "6cc759e807cab5411363b44c19c58e7a457b3715",
             "55dd18007cd5664be17c1e7c4666fd1f00dd93d6",
             "vellum-design-input/0.1-pilot",
             ".servo/required-policy.json",

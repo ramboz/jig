@@ -99,8 +99,31 @@ read/hash closure coverage. The producer subsequently identified an unfrozen
 scalar-quality execution wrapper and is sealing exact final `oracle.sh`
 bytes through its existing artifact closure and staged reapproval. Treat
 both inspected baseline/control records as historical interoperability, not
-final-current completion. Current whole-slice compliance is needs-changes;
-supporting craft/arch passes do not advance lifecycle.
+final-current completion. At that intermediate checkpoint whole-slice
+compliance was needs-changes; the final sealed-epoch section below supersedes
+this evidence gap. Supporting craft/arch passes alone never advance lifecycle.
+
+### Final sealed-epoch evidence (later 2026-10-15)
+
+The producer settled at `6cc759e807cab5411363b44c19c58e7a457b3715`
+(integrated readback `6d5e5b66c7f3ed796c7cbbbafdb84012e2e29cb5`).
+The same namespaced wire contract now seals the exact full final oracle
+through the existing approved evaluator-artifact closure. Independent
+prepared-definition and staged-driver approvals precede ordinary final
+approval/install/reinstall. The live guidance pin is renewed to this epoch;
+the initial5440pin above remains the readiness/source-history reference.
+
+Parent PRE-RESULT contexts independently select raw approved checks, full
+oracle, all3887nestedruntime files, C1 source approval, effective config and
+source/build/current-delivery roots. Jig rehashed those references and all
+678indexed proof artifacts. Fresh read-only actual attestations are
+baselinepass, genuine high-quality/required-failurefail, componentpass/
+quality-failurefail, and genuine inconclusiveneeds-changes;13labelled
+mutations also receive actual nonpassing verdicts.
+See [sealed-proof.md](verification/sealed-proof.md) for immutable pins,
+required outcomes,124CLI observations and explicit trust/scope limits.
+Normal whole-slice reviews and lifecycle gates still apply; no119-02
+persisted-freshness or119-03 legacy capability is claimed.
 
 ## Authoring phase (historical proposal)
 

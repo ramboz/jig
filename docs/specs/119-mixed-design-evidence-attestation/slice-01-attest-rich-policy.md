@@ -1,7 +1,7 @@
 ---
-status: IN_PROGRESS
+status: RECONCILED
 dependencies: [071-01, 104-02, adr-0065]
-last_verified:
+last_verified: 2026-10-15
 arch_review: true
 frame_review: true
 claimed_by: jig-producer-backed-attestation
@@ -109,28 +109,30 @@ at REVIEWED and DONE. Publish exact runnable fixture commands at implementation.
 **Preserved behavior:** Separate compliance/craft/reconciliation, opt-in gate
 and no producer invocation from review.
 
-**Code revision / dirty-change identity:** The implemented source cut, actual
-historical producer references, independently selected context, read/hash
-limits and observed CLI refusals are recorded in
-[verification/checkpoint.md](verification/checkpoint.md). Final-current
-completion proof remains pending; no historical run is relabelled.
+**Code revision / dirty-change identity:** The original checkpoint is preserved
+in [verification/checkpoint.md](verification/checkpoint.md). Actual final
+sealed-source6cc759e runs, independent PRE-RESULT contexts, complete nested
+execution closure, source/build/delivery identities, attester verdicts and
+124CLI observations are in [verification/sealed-proof.md](verification/sealed-proof.md).
+No historical run is relabelled; the actual Jig implementation source is
+492f128d with a later producer-pin guidance/test update.
 
 | Step | AC | Expected | Observed | Outcome | Evidence |
 |------|----|----------|----------|---------|----------|
-| Baseline attestation and completion | 1, 2 | Pass record; existing rail clears | Genuine baseline attester returned needs-changes; recorded verdict refused REVIEWED/DONE | fail (non-clearing, correctly preserved) | [Checkpoint](verification/checkpoint.md); renewed final-current pass/completion pending |
-| Required failure with high composite | 3 | Non-pass; refusal names required failure | Not executed | not-run | Required genuine planted-failure run, pending |
-| Inconclusive or missing evidence | 4 | Non-pass; refusal names missing/inconclusive evidence | Not executed | not-run | Genuine inconclusive capture plus labelled deletion fixture, pending |
-| Deterministic component passes, overall quality fails | 1, 6 | Non-pass; REVIEWED/DONE refuse despite component pass | Historical genuine control attester fail; both transitions refused | pass for historical refusal only; final-current not-run | [Actual attestation](verification/quality-fail-attestation.md), [CLI checkpoint](verification/checkpoint.md) |
+| Baseline attestation and completion | 1,2 | Pass record; existing rail clears | Sealed cbe6 actualpass with complete reviewer-authored provenance; isolated REVIEWED/RECONCILED/DONE clear only after all unrelated review preconditions | pass | [Actual complete baseline](verification/sealed-baseline-attestation-complete.md), [124CLI proof](verification/sealed-proof.md) |
+| Required failure with high composite | 3 | Non-pass; refusal names required failure | Genuine7896 quality0.9675/default0.8 but two20.01vs20fontfailures; actualfail; REVIEWED/DONE refuse; contradiction copy refuses | pass | [Actual required failure](verification/sealed-required-failure-attestation.md) |
+| Inconclusive or missing evidence | 4 | Non-pass; refusal names missing/inconclusive evidence | Genuine dc9e env_error/12unknown actualneeds-changes;13labelled missing/version/run/digest/contradiction variants nonpass; all refuse both transitions | pass | [Actual control matrix](verification/sealed-controls-attestation.md) |
+| Deterministic component passes, overall quality fails | 1,6 | Non-pass; REVIEWED/DONE refuse despite component pass | Genuine2de07 all28requiredpass but quality0.5278427304671842<0.8; actualfail; both transitions refuse; overall-pass contradiction refuses | pass | [Actual quality control](verification/sealed-controls-attestation.md) |
 
 **DoD:**
-- [ ] All ACs verified with witnessed red-to-green tests and producer-backed
+- [x] All ACs verified with witnessed red-to-green tests and producer-backed
   overall-gate/component scenario evidence, including genuine served-build
   binding and the component-pass/quality-fail control; no not-run step credited
   as success.
-- [ ] Targeted review/workflow tests and affected host-package checks pass.
-- [ ] Independent compliance, craft and arch reviews recorded and clear.
-- [ ] Deviation log, reconciliation sweep and reconciliation review recorded.
-- [ ] Live guidance describes the new predicate without changing closed records.
+- [x] Targeted review/workflow tests and affected host-package checks pass.
+- [x] Independent compliance, craft and arch reviews recorded and clear.
+- [x] Deviation log, reconciliation sweep and reconciliation review recorded.
+- [x] Live guidance describes the new predicate without changing closed records.
 
 ### Close-out (post-DONE)
 
@@ -148,7 +150,7 @@ implementation. These are spec A1/A2 assumptions, not already shipped evidence.
 
 ### Deviation log (after reconciliation)
 
-Partial implementation checkpoint, not completed reconciliation:
+Initial implementation checkpoint:
 the existing prompt/output envelope now describes the rich predicate and
 namespaced producer bindings. Existing record/validator/lifecycle composition
 is unchanged; automatic persisted freshness is 119-02. Source/guidance/tests
@@ -157,9 +159,22 @@ proof is incomplete: the actual baseline attester refused incomplete
 raw-checks/nested-runtime audit coverage; a later producer execution-wrapper
 closure gap requires renewed sealed-driver records. The genuine quality-fail
 attester's nonpass and actual CLI refusals are retained as historical evidence.
-No AC was removed or waived; no score was recomputed.
+No AC was removed or waived; no score was recomputed. This earlier evidence
+gap is now resolved by the subsequent genuine sealed runs, independently
+selected complete closure and actual fresh attesters in
+[sealed-proof.md](verification/sealed-proof.md). The prior nonpassing
+baseline/quality records remain unchanged.
+The first final compliance review also required complete references in the
+actual positive attestation body and complete unrelated DONE prerequisites
+in the required-failure fixture. A separate reviewer-authored provenance
+addendum and corrected fixture traces resolve these without changing the
+producer data or rescoring. Initial replies/traces remain preserved.
 
-Compliance is needs-changes; supporting craft and arch reviews pass.
+Fresh final whole-slice compliance, craft, architecture and reconciliation
+reviews pass and were recorded with the normal helper; REVIEWED and
+RECONCILED cleared through their normal gates. Earlier needs-changes is
+retained in git/history and the recovery account above. Final lifecycle
+state is authoritative in this record's helper-maintained frontmatter.
 The craft redundancy nit is nonblocking and explicitly retained as synthetic
 verdict-rail support, not producer semantic coverage. No new production
 parser, pass, state, frontmatter, runtime dependency or scoring mechanism.
@@ -167,7 +182,8 @@ Closed 071/104, Accepted ADRs and conventions are untouched.
 
 ### Reconciliation sweep
 
-Checkpoint sweep only; no RECONCILED claim. Scope is this worktree's changes
+Independently reviewed reconciliation sweep.
+Scope is this worktree's changes
 above exact proposal base `dcfcbc5eb8bfaac8f3cf11405a5e6b6f254d5c98`,
 not the generated main-based changed-file list. The five inherited proposal/
 reservation/acceptance commits (including ADR-0065 and its framing artifacts)
@@ -179,9 +195,9 @@ in this checkpoint, not absence from the entire stacked branch.
 | `skills/independent-review/review.py`, tests and SKILL.md | updated | Full prompt predicate, output references and explicitly synthetic rail tests |
 | `docs/workflow.md` | updated | Read-only overall authority, input/delivery binding and 119-02 boundary |
 | Three `hosts/` packages | updated | Official generator; drift check passes |
-| 119 spec/plan/tasks/slice/verification and status board | updated | Actual accepted/readiness status, IN_PROGRESS, nonpassing compliance, genuine refusal limits; proposal-era claims marked historical |
-| 119 readiness/compliance/craft/arch/reconciliation review records | updated | Actual independent verdicts; readiness and supporting code-cut craft/arch pass, whole-slice compliance/reconciliation needs-changes |
+| 119 spec/plan/tasks/slice/verification and status board | updated | Accepted readiness, sealed proof and final passing implementation reviews; historical IN_PROGRESS/nonpassing checkpoint explicitly superseded; lifecycle derived from this record |
+| 119 readiness/compliance/craft/arch/reconciliation review records | updated | Final actual compliance/craft/arch/reconciliation pass recorded; historical nonpasses retained, never an orchestrator-invented pass |
 | `docs/architecture.md`, ADRs, conventions | no-op | Existing approved boundary reused; no new module/API or decision |
 | Inbox/primers/closed records | no-op | No item resolved, spec not closed, no amendment authorized |
-| 119-02/03 and other repositories | deferred | Separate owners/scope; final producer context must arrive from parent |
-| `docs/memory/learnings.md` | updated | Raw manifest hashes do not establish independently pinned transitive closure; helper summary/team check completed |
+| 119-02/03 and other repositories | deferred | Separate owners/scope; final producer context arrived and is consumed read-only, automatic persisted freshness still119-02 |
+| `docs/memory/learnings.md` | updated | Transitive closure and complete attestation-record/isolated-witness learnings; helper summary/team check completed |
