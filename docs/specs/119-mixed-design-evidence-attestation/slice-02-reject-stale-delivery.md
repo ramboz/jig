@@ -1,10 +1,9 @@
 ---
-status: RECONCILED
+status: DONE
 dependencies: [119-01, adr-0065]
 last_verified: 2026-10-15
 arch_review: true
 frame_review: true
-claimed_by: jig-delivery-freshness-guard
 ---
 
 ## Slice 119-02 — reject-stale-delivery
