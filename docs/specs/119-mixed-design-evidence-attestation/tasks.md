@@ -2,8 +2,9 @@
 
 This is a work plan, not an implementation completion checklist.
 Authoring review evidence is in the ADR and slice `reviews/` directories.
-The 2026-10-15 implementation checkpoint in `plan.md` supersedes proposal-era
-pending claims below. 119-02/03 remain outside this implementation.
+The 2026-10-15 implementation checkpoints in `plan.md` supersede proposal-era
+pending claims below. This worktree implements only 119-02, stacked on the
+completed 119-01 parent. 119-03 remains DRAFT and outside this implementation.
 
 ## Before readiness
 
@@ -52,13 +53,25 @@ compress-on-spec-close primer change applies.
 
 ## 119-02 — freshness through final delivery
 
-- [ ] Write failing tests for changed app with unchanged eval definition and
+- [x] Verify exact selected parent locally/remotely and all three source pins.
+- [x] Pass independent framing/spec-readiness and claim through normal helpers.
+- [x] Write failing tests for changed app with unchanged eval definition and
   reuse of a previously passing review at DONE without a back-edge.
-- [ ] Narrowly add source/target, effective policy/config and app/delivery
+- [x] Narrowly add source/target, effective policy/config and app/delivery
   reference/digest checks to existing design-review evidence validation.
 - [ ] Exercise genuine A/B/renewed runs and dirty/config/approval changes;
   preserve documentation-only application identity.
 - [ ] Record trust limits, validate, review, reconcile and close the slice.
+
+Current checkpoint: 25new/173affectedtests and normal selected-old-PASS
+read/hash reuse proof pass. Twelvecopied changes yield36specific refusals in
+72actualCLIobservations with unchanged pass/GitHEAD/size/mtime; restoration and
+outside-closure documentation change clear. All3887currentexternalruntime
+files and39copiedoutputfiles rehashed. Genuine changed-build renewal, not
+restoration, remains AC5; see `verification/slice-02-freshness-proof.md`.
+The compliance-discovered root-NUL diagnostic bug is fixed with witnessed
+red/green recording/reuse regressions; final genuine mutation proof was
+repeated on that exact guard source. Full ordered reviews remain gated by AC5.
 
 ## 119-03 — bounded legacy and opt-in preservation
 

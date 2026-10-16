@@ -13,7 +13,9 @@ use_cases: [UC-4, UC-7, UC-20]
 > [ADR-0065](../../decisions/adr-0065-attest-external-policy-verdict-delivered-revision.md).
 > Implementation checkpoint: ADR-0065/C0 are accepted; 119-01 passed
 > independent framing and spec-readiness reviews. See [plan.md](plan.md).
-> 119-02/03 remain DRAFT. Genuine sealed-epoch evidence is now recorded in
+> 119-02 is IN_PROGRESS with automatic freshness implemented; genuine
+> same-definition changed-build renewal remains its explicit acceptance gap.
+> 119-03 remains DRAFT. Genuine sealed-epoch evidence is recorded in
 > [verification/sealed-proof.md](verification/sealed-proof.md); the slice
 > frontmatter/status board is the live lifecycle source.
 >

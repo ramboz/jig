@@ -303,10 +303,26 @@ gate/component run IDs, paths/raw digests, both sides of all three identity
 comparisons, policy inventory/outcomes and producer refusal reasons. Keep
 these in the `record-review` body, including on `fail`/`needs-changes`; only
 `pass` clears. Compliance/craft/conditional reviews/reconciliation still apply.
-This is a prompt/attester boundary, not an executable producer parser:
-automatic persisted-pass freshness revalidation belongs to **119-02** and is
-not supplied by 119-01. **No richer-skill detection** — there is no external
-"design-review" skill category.
+For the explicitly selected rich freshness contract (119-02), put a finite
+`jig-design-selection` JSON fence in the slice body and a reviewer-authored
+`jig-design-bindings` JSON fence in the existing verdict body. Follow the
+[exact grammar and record/revalidation recipe](design-bindings.md).
+The writer refuses an inconsistent selected `pass`; REVIEWED and DONE re-read
+the pinned pre-result context, exact raw references and complete closed
+inventories, including nested runtime and independently mutable candidate
+input/build-output/delivery trees. Missing bindings cannot downgrade selection.
+No producer, evaluator, judge, browser, network or quality recomputation calls.
+Changes require fresh producer evidence and independent attestation; restoring
+exact bytes can restore consistency. Documentation outside the declared app
+closure is not invalidated solely by HEAD. Unselected historical evidence and
+unflagged slices keep their existing behavior; legacy expansion is separate.
+
+This controlled sealed local bundle links served-response hashes to selected
+delivery bytes, not arbitrary HTTP servers or hostile hosts. Root authorization,
+initial semantic comparisons and inventory completeness remain trusted-local
+reviewer decisions; the recorder never discovers or approves them. Unsigned
+records are not forgery-proof. **No richer-skill detection** — there is no
+external "design-review" skill category.
 
 > The `design_review` flag is set **by hand** on a slice/spec whose deliverable
 > is validated by an external design-fidelity eval — there is **no** mechanical

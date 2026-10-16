@@ -1478,8 +1478,8 @@ def build_design_review_prompt(spec_path: Path, slice_label: str,
     Explicit legacy threshold-only policies keep their scalar rule, not a
     fallback for missing rich evidence. Contract/comparison references are
     supplied in the slice body/deliverables, never discovered by this builder.
-    This slice adds no executable producer adapter or persisted freshness
-    validator (119-02 owns reuse against changed delivery).
+    Explicit finite bindings let the existing writer and REVIEWED/DONE
+    validator re-read/hash the selected local closure without evaluation.
 
     NO richer-skill detection (unlike pr-review / arch-review): there is no
     established external "design-review" skill category to defer to — this
@@ -1614,6 +1614,33 @@ identity when that declared closure proves it.
 Unsigned local hashes do not prove honest execution: an actor could rewrite
 artifacts and claims together. This trusted-local consistency check is not
 forgery-proof.
+
+## Persist the selected freshness comparisons
+
+If the slice selects a `jig-design-selection` JSON fenced block, retain its
+exact context reference in one reviewer-authored `jig-design-bindings` JSON
+fenced block in your verdict body. Use the finite `jig/design-freshness/1`
+grammar documented in `{Path(__file__).resolve().with_name("design-bindings.md")}`.
+Read the pinned PRE-RESULT context and every approved source/target, C0,
+frozen/installed policy/config, checks, full oracle and runtime reference.
+Verify complete closed inventories, including all nested runtime files and
+independent mutable candidate-input/build-output/delivery directories.
+Explicit selection cannot fall back to plain evidence if bindings are missing.
+
+Copy the exact run-linked `command_result_artifacts` record, not the last row
+of a ledger. Preserve overall/component/envelope/acquisition references, the
+complete output inventory and served-response/delivery byte links. Initial
+semantic equality and inventory completeness are your attestation, not something
+the recorder discovers or approves. Do not auto-generate an inventory from
+whatever current files or results happen to exist.
+
+The supported transport is a controlled sealed local bundle. This does not
+certify an arbitrary HTTP server or hostile host. The existing writer refuses
+an inconsistent selected pass; REVIEWED and DONE re-read/hash those bindings.
+No producer, evaluator or judge calls, browser/network access, recapture or
+quality recomputation. A changed binding requires fresh producer evidence and
+independent attestation; exact byte restoration may restore consistency.
+Changes outside the declared application closure are not HEAD-only staleness.
 
 ## Explicitly legacy threshold-only evidence
 
@@ -1770,7 +1797,8 @@ def detect_subagent_type() -> str:
 # — neither subcommand compares deliverable mtime against `reviewed_at`. The
 # superseded-only case (a `fail`/`needs-changes` not yet overwritten) IS
 # caught: it reduces to `verdict != pass`, which `check-reviews` already
-# reports via the shared validator.
+# reports via the shared validator. Selected rich design evidence additionally
+# revalidates explicit raw references/closed inventories (119-02), not mtimes.
 
 
 def _now_iso8601() -> str:
@@ -2004,6 +2032,10 @@ def record_review(args) -> int:
         out_path = _evidence.evidence_path(spec, args.slice, args.pass_name)
         slice_label = find_slice_label(spec, args.slice)
         body = _read_summary(args)
+        if args.pass_name == "design-review" and args.verdict == "pass":
+            problem = _evidence.design_freshness_problem(spec, args.slice, body)
+            if problem:
+                raise ReviewError(problem)
     except (ReviewError, _evidence.EvidenceError) as exc:
         sys.stderr.write(f"{exc}\n")
         return 2
