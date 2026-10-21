@@ -32,6 +32,12 @@ witnessed screenshot/order-test repairs remain in history. This checkpoint
 does not pre-credit reconciliation, commit/DONE or publication; the slice's
 frontmatter and final review records own those states.
 
+**Actual close-out:** normal reconciliation and post-commit DONE gates have now
+cleared, the board is regenerated/audited, and the ready unmerged stacked PR is
+published. [Delivery/readiness metadata](verification/slice-04-delivery.md)
+records the sequence without rewriting the earlier checkpoint or nonpasses.
+119-03 remains DRAFT and the spec remains IN_PROGRESS.
+
 ## 119-02 implementation checkpoint (2026-10-15)
 
 Exact selected parent and initial HEAD:

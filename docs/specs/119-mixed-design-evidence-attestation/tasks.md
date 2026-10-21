@@ -34,7 +34,7 @@ completed 119-01 parent. 119-03 remains DRAFT and outside this implementation.
 - [x] Legacy regression and external/closed-record preservation checks.
 - [x] Ordered compliance/craft/architecture and reconciliation.
 - [x] Memory, generated host packages, normal closure and board.
-- [ ] Commit/push verified lineage; unmerged ready PR stacked on #244.
+- [x] Commit/push verified lineage; unmerged ready PR stacked on #244.
 
 ## 119-01 — rich verdict through completion
 

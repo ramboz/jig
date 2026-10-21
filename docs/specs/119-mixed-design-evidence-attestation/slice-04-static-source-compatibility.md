@@ -144,7 +144,7 @@ digest separately from frozen producer/helper and candidate/build identities.
 | Legacy/currentness and originals | 6 | Supported old contract; originals unchanged | Actual old44a-B public check clears; 25 legacy tests; zero preservation mismatches | pass | [Preservation witness](verification/slice-04-static-proof.md#preservation-tdd-and-validation) |
 
 **DoD:**
-- [ ] All ACs verified; witnessed red-to-green tests and affected suites green.
+- [x] All ACs verified; witnessed red-to-green tests and affected suites green.
 - [x] Actual finite-scope independent attestation and consumer proof preserved.
 - [x] Independent compliance, craft and architecture reviews recorded.
 - [x] Implementation review passed.
