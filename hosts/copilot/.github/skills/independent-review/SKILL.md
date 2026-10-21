@@ -317,6 +317,20 @@ exact bytes can restore consistency. Documentation outside the declared app
 closure is not invalidated solely by HEAD. Unselected historical evidence and
 unflagged slices keep their existing behavior; legacy expansion is separate.
 
+The separately versioned `jig/static-design-freshness/1` supports approved
+Vellum `vellum-confirmed-source/0.2` / `static-css-subset/1` and Servo
+`static_source_contract_evidence/1` under native `gate_result/2` authority.
+Use its [finite static grammar](design-bindings.md#finite-static-source-variant),
+not an old-card wrapper. Rehash the entire selected runtime manifest, closed
+browser membership (including declared symlink identities), current candidate,
+root selection, build, delivery, output and every retained served response.
+Read source `inspect()` semantics; never execute it or the writer's `verify()`.
+The recorded attestation must preserve residuals and explicitly distinguish
+static declarations from visual quality, actual font faces, interactions,
+backend truth, full APP and arbitrary Jig app-DONE. Independent compliance
+still owns acceptance. Diagnostic 1.0/threshold 0 cannot clear native FAIL or
+required UNKNOWN. Historical producer bytes/residuals are never rewritten.
+
 This controlled sealed local bundle links served-response hashes to selected
 delivery bytes, not arbitrary HTTP servers or hostile hosts. Root authorization,
 initial semantic comparisons and inventory completeness remain trusted-local

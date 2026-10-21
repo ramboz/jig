@@ -421,8 +421,20 @@ Six top-level concerns, named in [product-vision.md § Core features](product-vi
 - skill helpers — Python helpers live **next to the skill that owns them** (`skills/<name>/*.py`), one per skill where the work is mechanical: `workflow.py`, `review.py`, `adr.py`, `tdd.py` (+ `quality.py`), `land.py`, `migrate.py`, `scaffold.py` (+ `stocktake.py`), `health.py` (code-health), `bug.py` (bug-fix), and `memory.py`. `scaffold-init` also owns `governance.py` (spec 106 / ADR-0051 — the autonomy governance plane: protected-path renderers + the identity/capability-separation check). Shared stdlib-only helpers live in `skills/_common/` (`parsing.py`, `review_evidence.py`, `design_bindings.py`, `lexicon.py`, `team_signal.py`, `use_cases.py`, `scaffold_state.py`, `atomic_io.py`, `cross_ref_state.py` — spec 112, the ref-aware identifier-state read).
 
 The selected rich design-review consumer uses
-[`design_bindings.freshness_problem`](../skills/_common/design_bindings.py#L402)
+[`design_bindings.freshness_problem`](../skills/_common/design_bindings.py#L419)
 from the existing recorder and evidence validator (119-02 / ADR-0065).
+The explicit `jig/static-design-freshness/1` variant (119-04) dispatches to
+[`static_design_bindings.validate`](../skills/_common/static_design_bindings.py#L817)
+in the same package, retaining Vellum confirmed-source 0.2 and Servo's native
+static evidence kind. This is a finite consumer implementation within
+ADR-0065's ownership, not a new producer/runtime boundary. It checks the
+native overall verdict and complete approved required inventory, source and
+policy domains, grading, explicit runtime files/browser membership, current
+candidate/build/delivery, run/nonce and retained served-response/output links.
+Ordinary Ref/Tree symlink traversal remains forbidden; explicitly selected
+interpreter alias identities and closed browser membership use lstat/readlink,
+not arbitrary path following. Native loader labels remain provenance rather
+than a claim to certify the current host loader's resolution.
 It reads a finite reviewer-authored body record, pinned independent context,
 explicit narrow roots, raw file references and closed directory inventories.
 The existing REVIEWED/DONE composition checks current declared bytes without
@@ -432,6 +444,11 @@ producer-schema adapter, arbitrary HTTP witness, registry or new lifecycle
 gate. The initial semantic comparisons, closure completeness and local root
 authority remain the independent reviewer's responsibility. See
 [the finite encoding and trust boundary](../skills/independent-review/design-bindings.md).
+The [actual static consumer proof](specs/119-mixed-design-evidence-attestation/verification/slice-04-static-proof.md)
+separates genuine M04 evidence/independent attestation, native FAIL/UNKNOWN,
+synthetic lifecycle prerequisites and disposable copy probes. Its finite static
+scope is not visual-quality, actual-font-face, interaction, backend, full-APP
+or arbitrary application-DONE certification.
 - `scripts/` — top-level repo tooling, not skill helpers: `usage.py` (per-spec token/cost reporting), `verify_install.py`, `spec_lint.py`, `validate_manifests.py`, `skill_routing.py` (skill-routing eval), `build_release_zip.py`, `build_codex_plugin.py`, the `*_contract.py` builders, and `run_tests.py`
 - `.claude-plugin/` — Claude plugin manifest (`plugin.json`) + marketplace descriptor (`marketplace.json`)
 - `.codex-plugin/` — Codex plugin manifest (`plugin.json`)

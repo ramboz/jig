@@ -82,14 +82,18 @@ def _float(value: str) -> float:
     return number
 
 
-def _json(text: str, label: str) -> dict:
+def _json_value(text: str, label: str) -> Any:
     _require(len(text.encode("utf-8")) <= MAX_JSON, label, "oversized JSON")
     try:
         value = json.loads(text, object_pairs_hook=_pairs,
                            parse_constant=_constant, parse_float=_float)
     except (ValueError, RecursionError) as exc:
         raise BindingError(f"{label}: malformed, duplicate or nonfinite JSON") from exc
-    return _object(value, label)
+    return value
+
+
+def _json(text: str, label: str) -> dict:
+    return _object(_json_value(text, label), label)
 
 
 def _block(text: str, name: str) -> dict | None:
@@ -196,10 +200,14 @@ class _Reader:
         return path
 
     def document(self, value: Any, label: str) -> dict:
+        return _object(self.data(value, label), label)
+
+    def data(self, value: Any, label: str) -> Any:
+        """Strict JSON, including the static producer's finite manifest arrays."""
         path = self.ref(value, label)
         try:
             _require(path.stat().st_size <= MAX_JSON, label, "oversized JSON")
-            return _json(path.read_text(encoding="utf-8"), label)
+            return _json_value(path.read_text(encoding="utf-8"), label)
         except (OSError, UnicodeError) as exc:
             raise BindingError(f"{label}: inaccessible or non-UTF-8 JSON") from exc
 
@@ -265,6 +273,15 @@ def _version(value: dict, kind: str, version: int, run: str, label: str) -> None
 
 
 def _validate(selection: dict, bindings: dict) -> None:
+    # An explicit incompatible namespace, never an expansion of the card allowlist.
+    from _common.static_design_bindings import SCHEMA as STATIC_SCHEMA
+    from _common.static_design_bindings import validate
+    if selection.get("schema") == STATIC_SCHEMA or bindings.get("schema") == STATIC_SCHEMA:
+        try:
+            validate(selection, bindings)
+        except (KeyError, TypeError, AttributeError, OverflowError) as exc:
+            raise BindingError("static contract: malformed required nested field") from exc
+        return
     selection = _object(selection, "selection", {"schema", "roots", "context"})
     bindings = _object(bindings, "bindings", {
         "schema", "context", "run_id", "records", "result_artifact", "output", "served",

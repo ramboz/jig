@@ -1,6 +1,8 @@
 # Tasks: mixed design-evidence attestation
 
 This is a work plan, not an implementation completion checklist.
+The current follow-up is 119-04, scoped by its own slice and the new
+2026-10-21 plan entry; the 119-02 checkpoint prose below is historical.
 Authoring review evidence is in the ADR and slice `reviews/` directories.
 The 2026-10-15 implementation checkpoints in `plan.md` supersede proposal-era
 pending claims below. This worktree implements only 119-02, stacked on the
@@ -22,6 +24,17 @@ completed 119-01 parent. 119-03 remains DRAFT and outside this implementation.
   with historical/unflagged/default behavior unchanged.
 - [x] Obtain later-phase ADR acceptance and readiness review authority.
 - [x] Obtain independent spec-readiness verdict (not the framing verdict).
+
+## 119-04 — finite real-source/static compatibility
+
+- [x] Independent framing/readiness and normal working-state claim.
+- [x] Required implementer: failing tests, complete finite versioned consumer.
+- [x] Genuine M04 independent attestation and public CLI/lifecycle positive.
+- [x] Actual D09 FAIL / M04 UNKNOWN refusals; isolated mutation/restoration.
+- [x] Legacy regression and external/closed-record preservation checks.
+- [x] Ordered compliance/craft/architecture and reconciliation.
+- [ ] Memory, generated host packages, normal closure and board.
+- [ ] Commit/push verified lineage; unmerged ready PR stacked on #244.
 
 ## 119-01 — rich verdict through completion
 

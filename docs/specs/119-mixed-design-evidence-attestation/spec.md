@@ -15,7 +15,10 @@ use_cases: [UC-4, UC-7, UC-20]
 > independent framing and spec-readiness reviews. See [plan.md](plan.md).
 > 119-02 has automatic freshness implemented and genuine same-definition
 > A/B renewal proof; its own review/lifecycle records govern completion.
-> 119-03 remains DRAFT. Genuine sealed-epoch evidence is recorded in
+> 119-03 remains DRAFT. 119-04 adds finite confirmed-source/static compatibility;
+> its [actual scoped proof](verification/slice-04-static-proof.md) and own
+> review/lifecycle records govern that follow-up, not the old card checkpoint.
+> Genuine sealed-epoch evidence is recorded in
 > [verification/sealed-proof.md](verification/sealed-proof.md); the slice
 > frontmatter/status board is the live lifecycle source.
 >
@@ -295,6 +298,7 @@ documentation and a producer-backed scenario, not a parser-only phase.
 - [119-01 — attest-rich-policy](slice-01-attest-rich-policy.md)
 - [119-02 — reject-stale-delivery](slice-02-reject-stale-delivery.md)
 - [119-03 — legacy-and-opt-in](slice-03-legacy-and-opt-in.md)
+- [119-04 — static-source-compatibility](slice-04-static-source-compatibility.md)
 
 ## Historical authoring review and implementation stop
 

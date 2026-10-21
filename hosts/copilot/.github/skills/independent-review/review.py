@@ -1588,6 +1588,35 @@ invocation and digest domains; an unauditable comparison cannot clear.
 Preserve paths, run IDs, hashes and comparison outcomes; do not trust an
 envelope's self-asserted binding alone.
 
+## Separately selected finite static source evidence
+
+`jig/static-design-freshness/1` is the explicit Vellum
+`vellum-confirmed-source/0.2`, `static-css-subset/1` and Servo
+`static-source-contract-app/1` variant. Its envelope remains
+`static_source_contract_evidence` integer schema 1, NOT `design_evidence`.
+It uses native overall `gate_result/2` authority, not a component diagnostic
+fraction or a threshold-zero waiver. Native FAIL and required UNKNOWN refuse.
+Read the source API's `inspect()` semantics only; never import or call source
+`verify()`, reapprove, invoke Servo or run a browser/model/network subprocess.
+
+For this variant use the separate finite encoding in the same grammar document
+below. Pin the full approved source package and current originals, independent
+exact-policy review, installed/frozen checks and gate/grader/driver, all runtime
+manifest file bytes, declared interpreter aliases and closed browser membership
+(directories/files/symlink identities, without following symlink Refs).
+Compare the independently selected TARGET ROOT `candidate-selection.json`,
+candidate resources/metadata, copy-only build and delivery with the evaluated
+closure. Check every completed served resource's status, type, content-type and
+retained body, complete immutable output, invocation/run/nonce and claim/receipt.
+
+In the recorded review explicitly retain source and policy residuals and state:
+finite static declarations do NOT certify visual quality, actual font faces,
+interactions, backend truth, full APP or arbitrary Jig app-DONE. Independent
+compliance retains acceptance authority; this attestation cannot replace it.
+The marker's approved four presence/width/height/background facts do not invent
+APP empty-text, shape or meaning requirements. Historical producer residuals
+(including an old statement of Jig incompatibility) stay original bytes.
+
 ## Bind the run to the approved inputs and delivery
 
 For a new attestation, compare the run against separately supplied references:
@@ -1621,6 +1650,8 @@ If the slice selects a `jig-design-selection` JSON fenced block, retain its
 exact context reference in one reviewer-authored `jig-design-bindings` JSON
 fenced block in your verdict body. Use the finite `jig/design-freshness/1`
 grammar documented in `{Path(__file__).resolve().with_name("design-bindings.md")}`.
+For the separately selected static variant use `jig/static-design-freshness/1`
+there instead; never wrap it in the old card C0 or fabricate old fields.
 Read the pinned PRE-RESULT context and every approved source/target, C0,
 frozen/installed policy/config, checks, full oracle and runtime reference.
 Verify complete closed inventories, including all nested runtime files and

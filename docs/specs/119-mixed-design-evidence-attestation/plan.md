@@ -1,5 +1,37 @@
 # Plan: mixed design-evidence attestation
 
+## 119-04 implementation frame (2026-10-21)
+
+Add finite real-source/static-evidence compatibility, stacked on open PR #244
+at exact `756f39dcdd842f9cdf3b34b6924e9b216212af13`, in the isolated
+`jig-static-evidence-bridge` worktree. The [new slice](slice-04-static-source-compatibility.md)
+is the scope/AC authority; 119-03 and closed records remain unchanged.
+
+Ground the new versioned shape in actual Vellum 0.2 / Servo static output, not
+an old-card wrapper. Reuse the existing record/hash/revalidation seams and
+strict reader where appropriate; preserve overall verdict and exact complete
+required inventory, independent current closure, source/policy/runtime/grading
+and run/nonce/output/served-response identities. Within ADR-0065's accepted
+ownership this is a concrete supported variant, not a new architecture decision.
+No source-writer, browser, evaluator, model, recapture, regrade or merge.
+
+Order: independent frame/readiness; normal claim; required implementer with
+witnessed failing tests; real current M04 independent finite attestation and
+CLI/lifecycle proof plus actual FAIL/UNKNOWN and safe copy mutations; ordered
+compliance/craft/architecture; reconciliation/memory/host regeneration; normal
+REVIEWED/RECONCILED/commit/DONE and board gates; verified stacked ready PR.
+Preserve nonpasses and distinguish synthetic prerequisites from real evidence.
+
+**Implementation/review checkpoint:** the explicit static consumer and live
+guidance are implemented; actual M04 public lifecycle proof and independent
+finite attestation, actual D09 FAIL / M04 UNKNOWN refusals, 222 isolated
+synthetic CLI probes and unchanged original/legacy evidence are preserved in
+[the proof receipt](verification/slice-04-static-proof.md). Full compliance,
+craft recovery and architecture pass. The genuine first craft nonpass and its
+witnessed screenshot/order-test repairs remain in history. This checkpoint
+does not pre-credit reconciliation, commit/DONE or publication; the slice's
+frontmatter and final review records own those states.
+
 ## 119-02 implementation checkpoint (2026-10-15)
 
 Exact selected parent and initial HEAD:
