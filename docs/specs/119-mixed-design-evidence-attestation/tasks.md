@@ -33,7 +33,7 @@ completed 119-01 parent. 119-03 remains DRAFT and outside this implementation.
 - [x] Actual D09 FAIL / M04 UNKNOWN refusals; isolated mutation/restoration.
 - [x] Legacy regression and external/closed-record preservation checks.
 - [x] Ordered compliance/craft/architecture and reconciliation.
-- [ ] Memory, generated host packages, normal closure and board.
+- [x] Memory, generated host packages, normal closure and board.
 - [ ] Commit/push verified lineage; unmerged ready PR stacked on #244.
 
 ## 119-01 — rich verdict through completion

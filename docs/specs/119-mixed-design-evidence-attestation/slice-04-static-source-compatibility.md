@@ -1,10 +1,9 @@
 ---
-status: RECONCILED
+status: DONE
 dependencies: [119-02, adr-0065]
 last_verified: 2026-10-21
 frame_review: true
 arch_review: true
-claimed_by: jig-static-evidence-bridge
 ---
 
 ## Slice 119-04 — static-source-compatibility
@@ -156,8 +155,8 @@ digest separately from frozen producer/helper and candidate/build identities.
 
 ### Close-out (post-DONE)
 
-- [ ] Regenerate/audit the board after DONE; preserve finite scope in Notes.
-- [ ] Spec remains open for distinct 119-03; no compress-on-spec-close claim.
+- [x] Regenerate/audit the board after DONE; preserve finite scope in Notes.
+- [x] Spec remains open for distinct 119-03; no compress-on-spec-close claim.
 
 **Anti-horizontal-phasing check:** A developer gets an actual supported finite
 attestation and completion/refusal across public CLI, review storage and

@@ -353,7 +353,7 @@
 | [119-mixed-design-evidence-attestation](119-mixed-design-evidence-attestation/spec.md) | 119-01 — attest-rich-policy | **DONE** | Installed overall-policy authority + independently pinned closure; read/hash-only initial attestation. Persisted-pass freshness remains119-02. |
 | [119-mixed-design-evidence-attestation](119-mixed-design-evidence-attestation/spec.md) | 119-02 — reject-stale-delivery | **DONE** | Selected raw/context/inventory revalidation at REVIEWED/DONE; zero producer/judge calls; genuine actual44a A-record, unchanged-A refusal on B, renewed-B completion; historical unselected evidence preserved. |
 | [119-mixed-design-evidence-attestation](119-mixed-design-evidence-attestation/spec.md) | 119-03 — legacy-and-opt-in | DRAFT |  |
-| [119-mixed-design-evidence-attestation](119-mixed-design-evidence-attestation/spec.md) | 119-04 — static-source-compatibility | RECONCILED (jig-static-evidence-bridge) | Explicit static-source schema; native overall authority, complete source/runtime/current-delivery/run/output closure. Genuine M04 finite PASS, D09 FAIL and required UNKNOWN; no full-APP/visual-quality claim. Legacy card epoch preserved; craft nonpass/repair retained. |
+| [119-mixed-design-evidence-attestation](119-mixed-design-evidence-attestation/spec.md) | 119-04 — static-source-compatibility | **DONE** | Explicit static-source schema; native overall authority, complete source/runtime/current-delivery/run/output closure. Genuine M04 finite PASS, D09 FAIL and required UNKNOWN; no full-APP/visual-quality claim. Legacy card epoch preserved; craft nonpass/repair retained. |
 
 ## Deferred slices
 
