@@ -1477,3 +1477,6 @@ should store its marker at repository scope (`semantic_index.suggestion_state_pa
 and offer a tracked opt-out. Test both with a real `git worktree add`, not one
 directory run twice. Suggestion text an agent reads should also say *who*
 acts and *where*: "Install it" invites an in-sandbox install attempt.
+
+## Alias identity needs the complete interpreter chain
+Literal readlink identity is insufficient when a selected interpreter alias can traverse an undeclared intermediate symlink. In spec120 compliance, python -> hop -> python-real could remain text-identical while hop changed. Require a bounded acyclic chain through explicitly selected aliases to the pinned canonical interpreter; keep ordinary file references no-follow. Regression coverage lives in skills/_common/test_static_design_bindings.py. This is trusted-local identity checking, not a claim about a hostile host.

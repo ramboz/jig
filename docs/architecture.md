@@ -472,6 +472,57 @@ entries, so noninteractive review automation should keep using generated
 `review.py` prompts with a read-only runner unless the user is intentionally
 dogfooding an interactive `jig-reviewer` custom-agent thread.
 
+### Selected design evidence (spec 120 / ADR-0066)
+
+The existing design-review rail gains a finite selected-evidence check, not
+an evaluator or new lifecycle. `skills/_common/design_bindings.py` owns strict
+selection/fence parsing, bounded root/reference/tree reads and retirement
+dispatch. `static_design_bindings.py` checks the supported Vellum 0.2 / Servo
+static profile's recorded identities and native overall authority.
+`review_evidence.py` shares that check between the recorder's pre-overwrite
+validation, public checker and REVIEWED/DONE reuse.
+
+The producer owns source normalization, acquisition, CSS measurement, policy
+decisions and scoring. Jig never imports/calls it or re-scores an interface.
+Current original source bytes and original-root Git HEAD remain live
+comparisons; the narrowly fixed local Git metadata probe is isolated from
+inherited Git redirection and is not a filesystem-only/no-subprocess claim.
+Selected source/approval/policy/runtime/current candidate/build/delivery,
+run/nonce, complete output and retained served-response identities must agree.
+Native FAIL/UNKNOWN and incomplete/contradictory required outcomes cannot be
+overridden by component diagnostics.
+
+Component IDs, roles, goals, environment and resources are input data within
+the finite supported `vellum-confirmed-source/0.2` / `static-css-subset/1` /
+`static-source-contract-app/1` profile. Generic source helpers include
+`design_input.py`; generic static helpers include `evidence_io.py` and
+`evidence_runtime.py`. Actual helper/runtime bytes are pinned, and changed
+tooling requires a new approval epoch. No provider registry, JSON query
+language, browser dependency, new pass or schema alias is introduced.
+Retired `jig/design-freshness/1` / `vellum-design-input/0.1-pilot` selections
+refuse explicitly; unselected historical scalar reviews remain unchanged.
+
+Explicit alias-only metadata can include directory aliases, with complete
+bounded lexical substitution to the independently pinned interpreter;
+ordinary file/tree traversal remains no-follow. A frozen literal native
+component roster supports sole-static or static plus nongated scalar quality,
+with declared names/order/weights and native overall/required authority.
+Other non-comment `COMPONENTS` references outside that literal array refuse;
+Jig does not interpret arbitrary shell writes or compute a composite.
+
+Canonical implementation anchors: `skills/_common/design_bindings.py:121,265,287`
+(bounded reader/dispatch), `skills/_common/static_design_bindings.py:90,304,570,755`
+(live Git/explicit alias membership/frozen native roster), and
+`skills/_common/review_evidence.py:523,586` /
+`skills/independent-review/review.py:1973` /
+`skills/spec-workflow/workflow.py:943` (shared recording/reuse/lifecycle rail).
+
+The [selection/bindings reference](../skills/independent-review/design-bindings.md)
+documents the finite grammar and trusted-local limits. This checks recorded
+conclusions and bytes, not honest execution, visual quality, a hostile host
+or full-application DONE. Old unmerged effort records/proof epochs are not
+imported into this product replacement.
+
 ## Managed-File Metadata Policy
 
 Scaffolded files are tracked with a **manifest-only** default: `scaffold.json`

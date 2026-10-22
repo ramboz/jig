@@ -2035,6 +2035,26 @@ class DesignReviewPromptTests(unittest.TestCase):
         import shutil
         shutil.rmtree(self.tmpdir, ignore_errors=True)
 
+    def test_ac10_generic_static_prompt_and_retirement_without_pilot_instructions(self):
+        prompt = self._prompt()
+        for text in ("jig/static-design-freshness/1", "vellum-confirmed-source/0.2",
+                     "static-css-subset/1", "static-source-contract-app/1",
+                     "gate_result", "current original", "git", "retired",
+                     "read/hash", "required", "overall", "actual font faces"):
+            self.assertIn(text, prompt)
+        for text in ("ADR-0065", "119-", "old0065", "C1", "approved_card",
+                     "explicitly selected Servo pilot"):
+            self.assertNotIn(text, prompt)
+
+    def test_ac10_design_bindings_reference_is_existing_absolute_helper_sibling(self):
+        prompt = self._prompt()
+        match = re.search(r"Read `([^`]*design-bindings\.md)` for the exact local", prompt)
+        self.assertIsNotNone(match)
+        guide = Path(match.group(1))
+        self.assertTrue(guide.is_absolute(), "grammar reference must survive consumer cwd")
+        self.assertEqual(guide, REVIEW.resolve().with_name("design-bindings.md"))
+        self.assertTrue(guide.is_file(), "emitted grammar path must exist")
+
     def _prompt(self, *extra_args: str):
         result = run_review(
             "design-review", str(self.spec), "071-01",
