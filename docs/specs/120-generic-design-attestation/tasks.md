@@ -10,4 +10,4 @@
 - [x] Read/hash fresh native test epochs and independently verify final
   reviewed source/evaluator commit correspondence without rebinding approvals.
 - [x] Reconcile live docs, memory and record scopes; independent reconciliation.
-- [ ] Close lifecycle, commit/push branch, create replacement PR.
+- [x] Close lifecycle, commit/push branch, create replacement PR.
