@@ -30,11 +30,16 @@ completed 119-01 parent. 119-03 remains DRAFT and outside this implementation.
 - [x] Independent framing/readiness and normal working-state claim.
 - [x] Required implementer: failing tests, complete finite versioned consumer.
 - [x] Genuine M04 independent attestation and public CLI/lifecycle positive.
-- [x] Actual D09 FAIL / M04 UNKNOWN refusals; isolated mutation/restoration.
+- [x] Independent marker-control UNKNOWN refusal; isolated mutation/restoration.
 - [x] Legacy regression and external/closed-record preservation checks.
 - [x] Ordered compliance/craft/architecture and reconciliation.
 - [x] Memory, generated host packages, normal closure and board.
 - [x] Commit/push verified lineage; unmerged ready PR stacked on #244.
+
+Owner-directed publication cleanup (2026-10-22) removes dedicated app examples,
+proof documents and mixed-document app sections. Generic implementation and
+independent synthetic/control coverage remain; exact originals were privately
+archived without rebinding them to edited current-file identities.
 
 ## 119-01 — rich verdict through completion
 

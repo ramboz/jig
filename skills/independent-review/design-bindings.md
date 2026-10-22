@@ -375,8 +375,7 @@ attestation separately. Keep preparation output labelled as preparation, not an
 independent verdict. Use the earlier `record-review`/`check-reviews` commands
 with that real review body and selected slice. The parent owns genuine independent
 proof and lifecycle prerequisites; synthetic fixture reviews are not substitutes.
-For actual D09 FAIL use **F/dashboard-static-09**, run
-**77cd54b0-543d-4e68-af41-ea7785332fbb**. For M04 required UNKNOWN use run
+For M04 required UNKNOWN use run
 **9bef2a53-924e-4d0f-b4ec-eb323c488823**. Preserve their original verdicts/reasons,
 even where component diagnostic is 1.0 and threshold is 0.
 

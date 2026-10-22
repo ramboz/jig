@@ -19,7 +19,10 @@ SPECIFIC ISSUES:
 - [strength][impl] skills/_common/design_bindings.py:275 — Explicit incompatible-schema dispatch preserves the legacy validator and shared strict reader without adding evaluator dependencies, discovery or lifecycle gates.
 - [strength][impl] skills/_common/static_design_bindings.py:229 — Producer links must land in already rehashed inventories; closed browser membership and literal alias identities do not broaden ordinary symlink traversal authority.
 - [strength][impl] skills/independent-review/review.py:1591 — Prompt separates native overall authority from component diagnostics and explicitly retains independent compliance’s authority and finite-scope exclusions.
-- [strength][impl] docs/specs/119-mixed-design-evidence-attestation/verification/slice-04-static-proof.md:174 — Preserves the genuine craft nonpass, witnessed repair and final-source revalidation rather than rewriting history; genuine producer evidence remains distinguished from synthetic prerequisites and mutation probes.
 
 RECONCILIATION NOTES:
 No architectural deviation or additional ADR is warranted by this package-local implementation. Retain the documented trusted-local/root-selection and host-loader limitations, evidence-category distinctions, and archived nonpass/repair history during reconciliation.
+
+> Publication cleanup (2026-10-22): the reference to the withdrawn mixed-app
+> proof document was removed at the owner's explicit request. The original
+> review remains privately archived; this is an edited export, not a new review.

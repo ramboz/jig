@@ -40,13 +40,13 @@ therefore also called against the **actual repository**:
 No cross-ref/evidence/dependency gate override was used. The helper's optional
 Servo setup hint was not acted on; no Servo command ran.
 
-Source/currentness tests, type checks, generated-host drift guard, actual
-native revalidation and preservation are detailed in
-[the proof receipt](slice-04-static-proof.md).
-Its immutable implementation-proof snapshot remains
-`A/119-04-final-evidence-index.json`, SHA-256
-`fb602670eecae51fc6bb14dba6c7843eab65a8ec9b31f9994b5a208071f7ae0d`.
-This later delivery metadata is explicitly outside that frozen snapshot.
+The generic source/currentness regression suites, type checks and generated-host
+drift guard were retained with the independent
+[positive](slice-04-M04-attestation.md) and
+[required-UNKNOWN](slice-04-UNKNOWN-attestation.md) control attestations.
+App-specific proof publication and mixed proof pointers were subsequently
+removed under the explicit owner cleanup below; exact historical evidence is
+private, not reissued as an anonymized export.
 
 The final session handoff separately reads back the remote head/base and
 reports their exact SHAs; a committed document cannot self-pin its own commit.
@@ -58,3 +58,32 @@ not visual quality, actual font faces, interactions, backend/host authenticity,
 full APP or arbitrary Jig app-DONE. The genuine original producer records,
 source/runtime/targets, old card epoch, closed 119-01/02 records, Accepted
 ADR-0065 and conventions remain unchanged.
+
+## Owner-directed publication cleanup (2026-10-22)
+
+The owner requested removal of app-specific examples and proof documents from
+open PRs and their changed files. The dedicated app attestation and the mixed-app
+proof document were deleted in full, not pseudonymized. Their sections and
+references were also removed from live guidance, planning, slice/review exports
+and PR text. Generated host copies follow the same source cleanup.
+
+Before editing, all six open authored Jig PRs were read at their actual heads;
+their current changed-file bytes, titles/bodies and all issue/inline/review
+discussion bodies were archived privately. Only this feature PR contained
+named-app material. Other hits were either generic product-category prose or
+coincidental hexadecimal substrings, so no lower stacked branch or unrelated
+PR was changed or restacked. No owned editable comment required an edit.
+
+The private archive is session-local `app-reference-cleanup/originals` with a
+separate SHA-256 manifest; it also preserves the exact pre-cleanup source/helper
+and publication bytes needed to interpret machine-bound historical toolchain
+pins. Those old pins identify the archived epoch, **not** the current bytes of
+edited exports. No hashes, source approvals or selected evidence were renamed
+or rebound. Edited review exports are labelled as edited; their original
+verdicts are not regenerated or represented as fresh reviews.
+
+Consumer code, policy/oracles, strict paths/inventories and independent synthetic
+tests are unchanged. No private pilot/runtime/worktree was deleted; no source
+writer, capture, oracle, browser/model or previous pilot was rerun. Git commits
+and PR historical diffs are not rewritten; deleting current documents does not
+erase those immutable historical views.

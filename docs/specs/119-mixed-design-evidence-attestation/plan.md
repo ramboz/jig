@@ -23,20 +23,25 @@ REVIEWED/RECONCILED/commit/DONE and board gates; verified stacked ready PR.
 Preserve nonpasses and distinguish synthetic prerequisites from real evidence.
 
 **Implementation/review checkpoint:** the explicit static consumer and live
-guidance are implemented; actual M04 public lifecycle proof and independent
-finite attestation, actual D09 FAIL / M04 UNKNOWN refusals, 222 isolated
-synthetic CLI probes and unchanged original/legacy evidence are preserved in
-[the proof receipt](verification/slice-04-static-proof.md). Full compliance,
-craft recovery and architecture pass. The genuine first craft nonpass and its
-witnessed screenshot/order-test repairs remain in history. This checkpoint
-does not pre-credit reconciliation, commit/DONE or publication; the slice's
-frontmatter and final review records own those states.
+guidance are implemented. The independent marker-control
+[positive](verification/slice-04-M04-attestation.md) and
+[required-UNKNOWN](verification/slice-04-UNKNOWN-attestation.md) attestations
+remain separate from synthetic CLI fixtures. Full compliance, craft recovery
+and architecture passed; genuine nonpasses and their repairs remain recorded.
+The slice's frontmatter and final review records own lifecycle state.
 
 **Actual close-out:** normal reconciliation and post-commit DONE gates have now
 cleared, the board is regenerated/audited, and the ready unmerged stacked PR is
 published. [Delivery/readiness metadata](verification/slice-04-delivery.md)
 records the sequence without rewriting the earlier checkpoint or nonpasses.
 119-03 remains DRAFT and the spec remains IN_PROGRESS.
+
+**Owner-directed publication cleanup (2026-10-22):** dedicated app examples and
+proof documents were removed, not pseudonymized. Mixed-document app sections
+and pointers were removed as well. Exact original publication bytes and PR
+text were privately archived before editing; they are historical epochs, not
+the current identities of edited exports. No producer evidence was rebound,
+recaptured or regraded, and no implementation, policy or oracle was relaxed.
 
 ## 119-02 implementation checkpoint (2026-10-15)
 

@@ -47,7 +47,6 @@ Actual M04 run `41a3554e-8fd3-4d14-a59c-e7b8f2ec7593` has native
 `gate_result/2` pass, exit 0, all 15 required IDs passed; its subordinate output
 is `static_source_contract_evidence/1` with
 `vellum-confirmed-source/0.2`, `static-css-subset/1` and explicit residuals.
-Actual D09 run `77cd54b0-543d-4e68-af41-ea7785332fbb` is 16 pass / 4 fail.
 Actual M04 required-UNKNOWN run `9bef2a53-924e-4d0f-b4ec-eb323c488823`
 has diagnostic component fraction 1.0 but native composite null / exit 2.
 These are existing executions, not a request for new producer runs.
@@ -71,7 +70,7 @@ immutable historical producer data, not authority to relabel or rewrite it.
    overall PASS/exit 0 and conclusive complete required PASS consistent with the
    independently pinned installed policy/checks, component and static envelope.
    Reject duplicate, missing, extra, foreign-run or contradictory required rows.
-   Published D09 FAIL and required-UNKNOWN remain nonclearing even at threshold
+   Native FAIL and required-UNKNOWN remain nonclearing even at threshold
    0 or component diagnostic 1.0; preserve distinct producer reasons.
    This is consistency checking, not a second evaluator or score derivation.
 3. **Owned identities and complete closure.** Pin original source input,
@@ -94,8 +93,8 @@ immutable historical producer data, not authority to relabel or rewrite it.
 5. **Genuine bounded positive and negatives.** Obtain a fresh independent
    read-only finite-scope attestation of the actual published M04 all-15-PASS
    records and exercise public CLI record/revalidation and lifecycle completion
-   in an isolated fixture. Use actual D09 FAIL and M04 UNKNOWN records for
-   nonpass proof. Exercise safe disposable copy mutations and restored positive,
+   in an isolated fixture. Use the independent M04 UNKNOWN records for
+   nonpass control proof. Exercise safe disposable copy mutations and restored positive,
    preserving the original recorded positive body during reuse probes.
    Label genuine producer evidence, independent reviewer verdict, synthetic
    unrelated lifecycle prerequisites and copy-mutation probes separately.
@@ -110,7 +109,7 @@ immutable historical producer data, not authority to relabel or rewrite it.
    faces, interactions, backend truth, full APP and arbitrary Jig app-DONE.
    Retain policy/source residuals and independent compliance's authority.
    No Servo imports, evaluator/browser/model/network calls in the consumer;
-   no Dashboard fix, convergence loop, broad CSS/Figma or recurring-reader nit.
+   no convergence loop, broad CSS/Figma or recurring-reader nit.
 8. **Normal delivery.** Test-first implementation, independent compliance,
    craft and architecture reviews, reconciliation, normal evidence/dependency/
    commit/DONE gates, memory/board and generated three-host packages complete.
@@ -126,9 +125,11 @@ an isolated consumer fixture. Parent preservation baseline:
 `61f2e313-f28a-403a-9433-724268681e33/files/jig-static-compatibility-parent-baseline.json`,
 raw SHA-256 `ec3da3e6a4b6352eb7b9d04d2ca80e6d550a54f8d943b734e75f1bc85ca8427f`.
 
-**Invocation:** Actual commands and machine-readable observations retained in
-session artifacts, indexed by a committed verification receipt. Never run the
-producer, browser, source writer or regrader.
+**Invocation:** Actual commands and machine-readable observations were retained
+privately as historical epochs. The retained independent-control attestations
+are distinct from the synthetic fixtures; edited publication exports are not
+substitutes for original selected evidence. Never run the producer, browser,
+source writer or regrader.
 
 **Preserved behavior:** Legacy card epoch, explicit opt-in, independent ordinary
 reviews, complete currentness and original external bytes.
@@ -138,10 +139,10 @@ digest separately from frozen producer/helper and candidate/build identities.
 
 | Step | AC | Expected | Observed | Outcome | Evidence |
 |------|----|----------|----------|---------|----------|
-| Published M04 all-15-PASS | 1–5, 7 | Scoped independent record/check/lifecycle pass | Genuine attester PASS; actual public record/check/REVIEWED/RECONCILED/DONE clear | pass | [Actual proof](verification/slice-04-static-proof.md), 29-command trace |
-| Published D09 FAIL / M04 UNKNOWN | 2, 5 | Refusal, native verdict preserved | Attempted PASS refused with distinct native reasons; actual independent FAIL records preserved | pass | [D09](verification/slice-04-D09-attestation.md), [UNKNOWN](verification/slice-04-UNKNOWN-attestation.md) |
-| Copied binding mutations/restoration | 3–5 | Record/reuse/DONE refusal then exact restoration | Actual copied pre-result refusal/recovery plus 222 explicitly synthetic copy-data CLI probes | pass | [Scope-separated proof](verification/slice-04-static-proof.md) |
-| Legacy/currentness and originals | 6 | Supported old contract; originals unchanged | Actual old44a-B public check clears; 25 legacy tests; zero preservation mismatches | pass | [Preservation witness](verification/slice-04-static-proof.md#preservation-tdd-and-validation) |
+| Published M04 all-15-PASS | 1–5, 7 | Scoped independent record/check/lifecycle pass | Genuine attester PASS; actual public record/check/REVIEWED/RECONCILED/DONE clear | pass | [Independent control attestation](verification/slice-04-M04-attestation.md) |
+| M04 required UNKNOWN | 2, 5 | Refusal, native verdict preserved | Attempted PASS refused; independent nonpass preserved | pass | [Independent UNKNOWN attestation](verification/slice-04-UNKNOWN-attestation.md) |
+| Synthetic copied binding mutations/restoration | 3–5 | Record/reuse/DONE refusal then exact restoration | 222 explicitly synthetic copy-data CLI probes | pass | `skills/_common/test_static_design_bindings.py`; exact historical transcripts private |
+| Legacy/currentness and originals | 6 | Supported old contract; originals unchanged | 25 legacy tests; original epoch retained privately | pass | `skills/_common/test_design_bindings.py` |
 
 **DoD:**
 - [x] All ACs verified; witnessed red-to-green tests and affected suites green.
@@ -176,8 +177,8 @@ lifecycle reuse, not just a parser or an allowlist.
    architecture review found no new load-bearing decision requiring an ADR.
 2. **Proof categories remain separate.** Actual M04 native evidence plus a
    fresh independent finite attestation clears public recording/revalidation
-   and isolated lifecycle completion. Actual D09 FAIL and required UNKNOWN
-   remain nonclearing. Ordinary fixture prerequisites and 222 disposable
+   and isolated lifecycle completion. Required UNKNOWN remains nonclearing.
+   Ordinary fixture prerequisites and 222 disposable
    copy-data probes are explicitly synthetic, not producer executions or APP
    compliance. Original source/runtime/targets and closed records are unchanged.
 3. **Real craft recovery, not erased history.** The first craft verdict was
@@ -237,3 +238,20 @@ the old 119-01/02/ADR-0065 records remain separately byte-preserved.
 | `hosts/{claude,codex,copilot}` | `updated` | Official generation and drift guard, including corrected final screenshot guard. No installed plugin changes. |
 | Proof and nonpass history | `updated` | Actual independent responses, real native refusals, original craft nonpass/repair, actual vs synthetic transcripts and frozen 247-file implementation-proof index retained. |
 | Leanness / lightweight decisions / conventions | `no-op` | Required finite closures justify package-local code; arch pass found no speculative framework. No out-of-spec UI/copy decision and no convention change. |
+
+## Amendments
+
+### 2026-10-22 — Explicit owner-directed publication removal
+
+The owner explicitly requested removal of app-specific examples and proof
+documents, including affected mixed-document sections. Those materials were
+removed rather than pseudonymized, and the corresponding portions above were
+removed under that grant. Exact pre-cleanup files and PR text were privately
+archived first; this edited publication is not the original selected record
+bytes and does not revise the historical result or rebind an old hash.
+
+Generic consumer behavior, FAIL/UNKNOWN policy, strict binding/currentness
+requirements, independent synthetic/control tests and conventions are
+unchanged. Private pilot/runtime/worktrees and original producer records were
+not deleted or rerun. Historical branch/toolchain pins describe only their
+preserved original epoch, not the current identity of edited documents.

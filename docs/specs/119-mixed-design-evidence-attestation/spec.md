@@ -16,8 +16,10 @@ use_cases: [UC-4, UC-7, UC-20]
 > 119-02 has automatic freshness implemented and genuine same-definition
 > A/B renewal proof; its own review/lifecycle records govern completion.
 > 119-03 remains DRAFT. 119-04 adds finite confirmed-source/static compatibility;
-> its [actual scoped proof](verification/slice-04-static-proof.md) and own
-> review/lifecycle records govern that follow-up, not the old card checkpoint.
+> its retained [independent control attestation](verification/slice-04-M04-attestation.md)
+> and own review/lifecycle records govern that follow-up, not the old card
+> checkpoint. App-specific proof publication was removed under the owner's
+> 2026-10-22 cleanup instruction; exact historical originals remain private.
 > Genuine sealed-epoch evidence is recorded in
 > [verification/sealed-proof.md](verification/sealed-proof.md); the slice
 > frontmatter/status board is the live lifecycle source.

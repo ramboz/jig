@@ -17,4 +17,6 @@ No spec deviation identified in this delta. Preserve the original craft nonpass 
 
 Evidence-retention note from the orchestrator: the prior full pass cited above
 was preserved verbatim in `verification/slice-04-compliance-full.md` before
-re-recording this canonical review path.
+re-recording this canonical review path. That publication copy was subsequently
+edited under the owner's 2026-10-22 cleanup instruction; its exact original is
+privately archived and is not identified with the edited copy's current bytes.

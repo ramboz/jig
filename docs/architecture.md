@@ -444,9 +444,11 @@ producer-schema adapter, arbitrary HTTP witness, registry or new lifecycle
 gate. The initial semantic comparisons, closure completeness and local root
 authority remain the independent reviewer's responsibility. See
 [the finite encoding and trust boundary](../skills/independent-review/design-bindings.md).
-The [actual static consumer proof](specs/119-mixed-design-evidence-attestation/verification/slice-04-static-proof.md)
-separates genuine M04 evidence/independent attestation, native FAIL/UNKNOWN,
-synthetic lifecycle prerequisites and disposable copy probes. Its finite static
+The retained independent-control attestations
+([positive](specs/119-mixed-design-evidence-attestation/verification/slice-04-M04-attestation.md)
+and [required UNKNOWN](specs/119-mixed-design-evidence-attestation/verification/slice-04-UNKNOWN-attestation.md))
+remain distinct from synthetic lifecycle prerequisites and disposable test
+fixtures. Their finite static
 scope is not visual-quality, actual-font-face, interaction, backend, full-APP
 or arbitrary application-DONE certification.
 - `scripts/` — top-level repo tooling, not skill helpers: `usage.py` (per-spec token/cost reporting), `verify_install.py`, `spec_lint.py`, `validate_manifests.py`, `skill_routing.py` (skill-routing eval), `build_release_zip.py`, `build_codex_plugin.py`, the `*_contract.py` builders, and `run_tests.py`
