@@ -350,7 +350,7 @@
 | [116-use-case-progress-report](116-use-case-progress-report/spec.md) | 116-02 — orient-surface | **DONE** |  |
 | [117-decision-rulings-in-context](117-decision-rulings-in-context/spec.md) | 117-01 — tbd | DRAFT |  |
 | [118-behavioral-verification-pilot](118-behavioral-verification-pilot/spec.md) | 118-01 -- author-to-review | **DONE** |  |
-| [120-generic-design-attestation](120-generic-design-attestation/spec.md) | 120-01 — attest generic static evidence | RECONCILED (generic-design-attestation) |  |
+| [120-generic-design-attestation](120-generic-design-attestation/spec.md) | 120-01 — attest generic static evidence | **DONE** |  |
 
 ## Deferred slices
 

@@ -1,5 +1,5 @@
 ---
-status: IN_PROGRESS
+status: DONE
 skill: independent-review
 use_cases: [UC-4, UC-7, UC-15]
 ---

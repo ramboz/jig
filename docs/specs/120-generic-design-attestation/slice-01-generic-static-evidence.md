@@ -1,9 +1,8 @@
 ---
-status: RECONCILED
+status: DONE
 dependencies: [adr-0066]
 last_verified: 2026-10-22
 arch_review: true
-claimed_by: generic-design-attestation
 review_reopened_at: 2026-10-22T19:11:28Z
 ---
 
@@ -99,8 +98,8 @@ packages and explicit refusal of the retired interface.
 
 ### Close-out (post-DONE)
 
-- [ ] Regenerate and audit `docs/specs/README.md`.
-- [ ] Check primer surfaces and scaffold templates; no permanent active-spec
+- [x] Regenerate and audit `docs/specs/README.md`.
+- [x] Check primer surfaces and scaffold templates; no permanent active-spec
   detail is needed beyond the derived board.
 
 ### Deviation log (after reconciliation)
