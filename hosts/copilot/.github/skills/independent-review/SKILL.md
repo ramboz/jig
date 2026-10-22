@@ -59,9 +59,9 @@ every slice may run:
   ADR-0022. After the craft (+ arch) passes, the orchestrator queries the
   slice's `design_review:` flag via `workflow.py design-review-needed`;
   when `true`, it runs an **attest-only** pass: the read-only reviewer
-  attests an external, non-deterministic design-fidelity eval's frozen
-  verdict (e.g. servo's `.servo/design-eval/` composite ≥ its own
-  threshold, non-stale, `env_error` ≠ pass) and records pass/fail — it
+  attests an external design-fidelity eval's frozen
+  verdict (selected static native overall policy, or unselected historical
+  scalar threshold; non-stale, `env_error` ≠ pass) and records pass/fail — it
   never re-runs or re-derives the score (servo runs/scores, jig attests).
   Gates REVIEWED like arch. Authors set `design_review: true` when the
   slice ships UI gated by an external design-fidelity eval — and the slice
@@ -224,18 +224,39 @@ cross-model (rung-3) is deferred (`docs/refinement-todo.md`).
 
 ### Design-review (attest-only pass — slice 071-01 / ADR-0022, on-demand)
 
-Unlike every other pass, design-review produces no judgment of its own — it
-**attests** an *external, non-deterministic* eval's frozen verdict. The eval
-(e.g. servo's design-fidelity oracle) is the thing that RUNS the UI and SCORES
-it against a frozen design definition; this pass's read-only reviewer confirms,
-by reading the recorded eval evidence, that the eval actually **RAN**, is
-**NON-STALE** (its frozen config/threshold unchanged since the run), is
-**HONEST** (an `env_error` / infra failure is **not** a pass and **not** a
-0.0), and that the latest composite is **≥ the eval's own declared threshold** —
-then RECORDS that verdict. It **never re-runs, re-derives, or re-judges** the
-score: servo runs and scores, jig attests (the ADR-0022 honesty boundary). It
+Unlike every other pass, design-review produces no score of its own — it
+**attests** an external eval's preserved verdict. The producer runs and
+measures the interface; this pass's read-only reviewer confirms that the eval
+actually **RAN**, is **NON-STALE** and **HONEST** (`env_error` / infrastructure
+failure is never a pass or a 0.0 score). It **never re-runs, re-derives, or
+re-judges** the score: servo runs and scores, jig attests (ADR-0022). It
 runs only when the slice declares a truthy `design_review` flag, and gates
 REVIEWED exactly like `arch`.
+
+For selected `jig/static-design-freshness/1`, require native overall
+`gate_result/2` PASS and every approved required outcome, with complete
+source/approval/policy/runtime/current candidate/build/delivery/run/nonce/
+output/served-response bindings. A component success or high composite never
+overrides native FAIL/UNKNOWN or missing/contradictory evidence. The recorder
+checks selected passing bodies before overwrite; reuse and REVIEWED/DONE
+re-read the same explicit references. Live original source bytes and local
+Git HEAD identity remain required, not just archived bytes.
+
+Use the [finite selection/bindings reference](design-bindings.md) for exact
+roots, Refs, Trees, namespace objects, records, runtime closure, limits and
+renewal instructions. The supported producer remains bounded to Vellum
+`vellum-confirmed-source/0.2` / `static-css-subset/1` and Servo
+`static-source-contract-app/1`; IDs/roles/goals/resources are data.
+`jig/design-freshness/1` / `vellum-design-input/0.1-pilot` selections are
+retired and refuse explicitly. Do not relabel old approvals or downgrade
+selected missing evidence to the unselected scalar path. New generic runtime
+bytes require a new approval epoch.
+
+With no selection/bindings, existing historical scalar behavior remains:
+attest that the latest composite is **≥ the eval's own declared threshold**
+and that its frozen definition is unchanged. No-opt-in/unflagged slices are
+unaffected. Compliance, craft and reconciliation remain separate; static
+measurements do not certify visual quality or a whole application's DONE.
 
 ```bash
 PROMPT=$(python3 "$JIG_ROOT/skills/independent-review/review.py" \
@@ -248,8 +269,9 @@ PROMPT=$(python3 "$JIG_ROOT/skills/independent-review/review.py" \
 Record the verdict as the `design-review` pass; the `REVIEWED` gate requires it
 iff `design_review` is truthy (default-off slices transition freely). Although
 the shared envelope offers `pass | fail | needs-changes`, an attestation is
-binary — the recorded eval verdict either attests (honest, non-stale, meets its
-threshold) or it does not — so this pass meaningfully emits only `pass` / `fail`
+binary — the selected contract's full predicate holds, or the unselected
+historical eval is honest, non-stale and meets its own threshold, or it does
+not — so this pass meaningfully emits only `pass` / `fail`
 (the gate clears on `pass` and blocks on either of the others). **No
 richer-skill detection** — there is no external "design-review" skill category;
 the pass attests jig's own eval evidence. First consumer: food-log slice 002-01

@@ -332,6 +332,15 @@ Rule IDs do not establish precedence, and a demo never silently overrides ACs.
 External references name authority and revision; contradictions are surfaced
 for explicit resolution. The existing `design_review` attestation rail is unchanged.
 
+For explicitly selected static design evidence, the same rail also validates
+the supported producer's native overall verdict, independent source/approval/
+policy/runtime and current candidate/build/delivery, run/nonce, output and
+retained served-response links at recording and REVIEWED/DONE reuse.
+It never evaluates the interface or replaces compliance/craft. Use the
+[finite selection/bindings reference](../skills/independent-review/design-bindings.md);
+retired pilot selections refuse rather than silently falling back to scalar
+thresholds. Unselected historical scalar reviews remain unchanged.
+
 See the [runnable CLI example](../skills/spec-workflow/worked-example-behavioral-verification.md).
 
 ## Session workflow

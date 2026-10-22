@@ -1401,7 +1401,7 @@ Concede a `pass` only if the frame survives your strongest attack.
 """
 
 
-# -------- design-review prompt (slice 071-01 / ADR-0022) --------
+# -------- design-review prompt (071-01 / 120-01, ADR-0022 / ADR-0066) --------
 
 
 _DESIGN_REVIEW_OUTPUT_FORMAT = """\
@@ -1424,12 +1424,29 @@ NON-STALE:
  cite what you compared>
 
 THRESHOLD-MET:
-<is the latest composite >= the eval's OWN declared threshold? quote both
- the composite and the threshold>
+<scalar policy: latest composite >= its OWN threshold; selected static:
+ preserved native values only, never a substitute for overall authority>
+
+CONTRACTS / REFERENCES:
+<selected namespaces/pins; overall path/hash/run; component/envelope/output
+ references and raw digests; independently selected comparison context>
+
+BINDINGS:
+<source approval/target/request, current originals/git, frozen and installed
+ policy/config/runtime, current candidate/build/delivery: BOTH sides and
+ comparison outcomes; name unavailable comparisons>
+
+OVERALL-POLICY / REQUIRED-OUTCOMES:
+<native overall status/exit/reasons; approved inventory and every required
+ ID/outcome/evidence index; component success is not overall success>
+
+CONSISTENCY / REASONS:
+<run/nonce/raw-digest/output/served-response links, contradictions, residuals,
+ responsible producer condition/reason and evidence to renew on refusal>
 ```
 
-Be terse but specific. A `pass` means you ATTESTED an honest, non-stale,
-threshold-meeting eval verdict — NOT that you re-scored anything. (No
+Be terse but specific. A `pass` attests the whole selected policy, or the
+unchanged unselected scalar rule below — NOT that you re-scored anything. (No
 reconciliation-notes section: you record an attestation, you do not judge
 craft.)"""
 
@@ -1437,7 +1454,7 @@ craft.)"""
 def build_design_review_prompt(spec_path: Path, slice_label: str,
                                deliverables: list,
                                slice_path: Path | None = None) -> str:
-    """Construct the ATTEST-ONLY design-review prompt (slice 071-01 / ADR-0022).
+    """Construct the ATTEST-ONLY prompt (ADR-0022; generic static spec 120).
 
     The orchestrator runs this pass AFTER the compliance + craft (+ arch +
     code-health) passes, but ONLY when the slice's frontmatter declares
@@ -1466,13 +1483,14 @@ def build_design_review_prompt(spec_path: Path, slice_label: str,
     """
     slice_noun, slice_ref = _slice_source(spec_path, slice_path)
     deliverable_lines = "\n".join(f"   - `{d}`" for d in deliverables)
+    grammar_path = Path(__file__).resolve().with_name("design-bindings.md")
     return f"""{_PREAMBLE}
 
 ## Your job — ATTEST (do not re-derive)
 
 You are running the **design-review pass** on slice **{slice_label}**. The
 slice declared `design_review: true` — meaning it ships UI gated by an
-external, non-deterministic **design-fidelity eval** (e.g. servo's oracle).
+external **design-fidelity eval** (e.g. servo's oracle).
 
 **Your only job is to ATTEST the eval's frozen verdict — NOT to produce
 it.** The eval is the thing that RUNS the UI and SCORES it against a frozen
@@ -1481,6 +1499,79 @@ re-score, or re-judge** the eval. servo runs and scores; jig attests. That
 is the honesty boundary (ADR-0022): re-deriving the score here would
 launder a non-deterministic judgment into a deterministic-looking gate.
 
+## Selected generic static evidence
+
+Read the slice's explicit contract and independent comparisons before the
+result. The finite supported deterministic contract is
+`jig/static-design-freshness/1`, Vellum `vellum-confirmed-source/0.2` /
+`static-css-subset/1` and Servo `static-source-contract-app/1`. Its envelope
+is `static_source_contract_evidence` integer schema 1; snapshot candidate and
+build are schema 1. These namespaces are separate, never aliases.
+Read `{grammar_path}` for the exact local
+selection/bindings grammar. No discovery, frontmatter selector or new pass.
+
+The selected native overall `gate_result/2` is authority: require explicit
+PASS, integer exit 0, all required outcomes and no contradictions. Preserve
+native FAIL/UNKNOWN, exit code and producer reasons even at high composite or
+threshold zero. Component `required_component_result/1` success is subordinate;
+measurement fractions never certify overall quality. Required expectations
+come from independently approved source/policy, not just result rows.
+Missing/unknown/not-run/inconclusive/env_error required outcomes cannot clear.
+Never recompute scores, waive thresholds, repair or reapprove producer records.
+
+This is bounded read/hash/native-overall attestation, not a provider framework.
+Rich/mixed read-only judgment follows the installed producer-owned overall
+policy, including quality and optional-outcome semantics; deterministic
+record/check support here is explicitly finite to this static profile.
+Unsupported or ambiguous selected evidence refuses, never scalar fallback.
+Compliance, craft, reconciliation and all other flagged reviews remain
+independently necessary; do not replace their judgments.
+
+Compare separately selected source approval, complete source package and
+manifest/request/target digest domains. Check current original bytes AND
+current original-root git HEAD, not the archive alone. Git identity uses only
+a fixed bounded local metadata probe, isolated from inherited Git redirection:
+no shell, user argv, network or writes. Genuine non-Git roots have explicit
+null identity; execution, permission and timeout errors are non-clearing.
+Never import/call producer APIs, verify-current, evaluators, browsers or models.
+
+Pin independent exact-policy approval, effective frozen/installed checks,
+policy/config/grader/runtime and full oracle driver. Rehash the actual generic
+helper closure and runtime manifests, every runtime file, closed browser
+membership and declared interpreter aliases. No old approval relabelling.
+IDs, roles, goals, counts, environment and resources are selected input data.
+The supported command layout is isolated Python running static_contract.py
+evaluate --policy POLICY --constraint ID; Jig reads it, never executes it.
+
+Compare independently selected candidate-selection.json, complete candidate
+resources/metadata, copy-only static snapshot recipe/inputs/outputs and current
+delivery trees. Rehash complete run output at
+spec/oracle/static/runs/{{run_id}}/observed/evidence.json, retained served
+response bytes/status/type/content-type and screenshot. Require native
+overall/oracle-result/component/envelope/command_result_artifacts links,
+invocation, accepted gate, acquisition claim/receipt, run ID, nonce and every
+raw digest. Do not trust envelope assertions as independent authority.
+
+Record BOTH sides of comparisons, raw-byte SHA-256 and separately named
+semantic digest domains, required inventory/outcomes/reasons and residuals.
+Finite static measurements do NOT certify visual quality, actual font faces,
+interaction/backend truth, full APP or arbitrary Jig app-DONE. A nonpass or
+unavailable comparison names the responsible producer condition/run/reference
+and requires fresh producer evidence and independent attestation.
+record-review checks a selected pass before atomic overwrite; check-reviews
+and existing REVIEWED/DONE gates repeat the same check. Exact-byte restoration
+may restore consistency, but is not a new run or approval.
+
+`jig/design-freshness/1` and `vellum-design-input/0.1-pilot` are retired selected
+interfaces, including mixed namespaces and binding-only selections. Renew
+using generic tooling, independent source/policy approval and a new
+attestation. Never relabel historical approvals or downgrade missing selected
+bindings to the scalar rule. Unselected historical scalar attestations and
+unflagged slices retain their behavior.
+
+## Unselected historical scalar policy
+
+Only where no rich/static contract is selected, preserve the original rule.
 Confirm — by READING the recorded eval evidence — that:
 
 1. **It RAN.** The eval actually executed and produced a verdict. An
@@ -1493,7 +1584,7 @@ Confirm — by READING the recorded eval evidence — that:
    OWN declared threshold** (read both from the eval's frozen config — do
    not invent a threshold).
 
-If all three hold, RECORD a `pass`. If any fails — or you cannot locate /
+For this scalar policy, if all three hold, RECORD a `pass`. If any fails — or you cannot locate /
 read the evidence — RECORD a `fail` (or `needs-changes`) and say which.
 
 ## What to read (in this order)
@@ -1518,7 +1609,9 @@ read the evidence — RECORD a `fail` (or `needs-changes`) and say which.
   failure masquerading as a result? (infra failure ≠ pass ≠ 0.0)
 - Is the frozen eval definition (config + threshold) UNCHANGED since the
   recorded composite — i.e. is the verdict non-stale?
-- Is the latest composite **>= the eval's own declared threshold**?
+- For unselected scalar policy, is the latest composite **>= its own threshold**?
+- For selected static policy, does the native overall PASS and complete
+  required inventory agree with every independent binding and subordinate link?
 - Record the verdict. Do NOT re-run the eval, do NOT recompute the
   composite, do NOT substitute your own aesthetic judgment for the eval's.
 
@@ -1877,6 +1970,10 @@ def record_review(args) -> int:
         out_path = _evidence.evidence_path(spec, args.slice, args.pass_name)
         slice_label = find_slice_label(spec, args.slice)
         body = _read_summary(args)
+        if args.pass_name == "design-review" and args.verdict == "pass":
+            problem = _evidence.design_freshness_problem(spec, args.slice, body)
+            if problem:
+                raise ReviewError(problem)
     except (ReviewError, _evidence.EvidenceError) as exc:
         sys.stderr.write(f"{exc}\n")
         return 2
