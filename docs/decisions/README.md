@@ -67,6 +67,7 @@
 - [ADR-0061: GitHub Copilot CLI as a third committed host](adr-0061-copilot-third-host.md) — Adobe is retiring Claude Code as its sanctioned coding agent. (2026-09-15, Accepted)
 - [ADR-0064: Use-case progress rollup lives in jig as a bounded exception](adr-0064-use-case-progress-rollup-in-jig.md) — An owner of a project with many specs cannot tell whether the work is still advancing the product's goals. (2026-10-03, Accepted)
 - [ADR-0066: Component-agnostic design attestation](adr-0066-component-agnostic-design-attestation.md) — Jig needs reusable design attestation without shipping an application's proof of concept. (2026-10-22, Accepted)
+- [ADR-0067: Genesis spec 000 and a stub-free seed](adr-0067-genesis-spec-zero.md) — A greenfield `scaffold-init` seeds two numbered specs, `001-adopt-jig` (a `DONE` worked example) and `002-first-spec` (a `DRAFT` placeholder), so a project's own first spec is numbered 003. (2026-10-26, Accepted)
 
 ## Lightweight decisions
 
