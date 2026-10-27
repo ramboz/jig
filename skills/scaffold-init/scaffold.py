@@ -3278,24 +3278,27 @@ _GENESIS_SLUG = "adopt-jig"
 def _resolve_genesis_dir(target: Path, docs_root: str = "docs"):
     """Name of the genesis spec directory the rendered pointers must link, or
     None (ADR-0067 decision 4 invariant, slice 121-01). Decided BEFORE the
-    primers render, with the same predicate as `_emit_seed_spec`:
+    primers render. Greenfield-ness uses `_emit_seed_spec`'s predicate; an
+    existing genesis uses `workflow.py retire-genesis`'s (slug + frontmatter):
 
       - greenfield (`_specs_dir_has_content` False) -> this run emits
         `000-adopt-jig`;
-      - else `000-adopt-jig` already on disk -> it;
-      - else the legacy `001-adopt-jig`, recognised by slug + `skill:
-        scaffold-init` frontmatter (never by int value) -> it;
+      - else `000-adopt-jig`, then the legacy `001-adopt-jig`, each
+        recognised by slug + `skill: scaffold-init` frontmatter (never by
+        int value) -> it;
       - else None (no genesis spec: render no pointer)."""
     if not _specs_dir_has_content(target, docs_root):
         return f"000-{_GENESIS_SLUG}"
     specs = _scaffold_docs_base(target, docs_root) / "specs"
-    if (specs / f"000-{_GENESIS_SLUG}" / "spec.md").is_file():
-        return f"000-{_GENESIS_SLUG}"
-    legacy = specs / f"001-{_GENESIS_SLUG}" / "spec.md"
-    if legacy.is_file():
-        fields, _ = parse_frontmatter(legacy.read_text(errors="replace"))
-        if fields.get("skill") == "scaffold-init":
-            return f"001-{_GENESIS_SLUG}"
+    # Same predicate as `workflow.py retire-genesis` (slice 121-02): slug +
+    # `skill: scaffold-init` frontmatter, so a user's own `000-`/`001-adopt-jig`
+    # is never pointed at as the worked example.
+    for n in ("000", "001"):
+        spec_md = specs / f"{n}-{_GENESIS_SLUG}" / "spec.md"
+        if spec_md.is_file():
+            fields, _ = parse_frontmatter(spec_md.read_text(errors="replace"))
+            if fields.get("skill") == "scaffold-init":
+                return f"{n}-{_GENESIS_SLUG}"
     return None
 
 

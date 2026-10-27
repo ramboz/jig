@@ -57,6 +57,21 @@ user-invocable: true
   (totals, use cases with no done slice or no spec, Unanchored specs; slice
   116-02). No-op when the project has no `## Use cases` section or its marker
   says `status: unfilled` / `skipped` (not elicited yet).
+- Retires the seeded genesis spec via `workflow.py retire-genesis [--project-dir DIR] [--dry-run]`
+  (slice 121-02, [ADR-0067](../../docs/decisions/adr-0067-genesis-spec-zero.md)).
+  It removes `000-adopt-jig/` (new shape) or, in the legacy shape, `001-adopt-jig/`
+  (either one only when its frontmatter has `skill: scaffold-init`; otherwise reported
+  "not recognised as the jig seed; left in place") plus the legacy `first-spec` stub dir only while it is an untouched
+  stub (only `spec.md`, still `DRAFT`, with the seed's heading, lead, slice
+  heading and `_TODO_` placeholder intact; otherwise kept and reported). It
+  deletes the primer / `adoption-readiness.md` list items that point at the
+  removed spec, backticks any other link in `AGENTS.md`, `AGENTS.md`,
+  `adoption-readiness.md` and a kept stub, and regenerates the board. Links
+  from your own files are **reported, never rewritten**. It **refuses**
+  (non-zero, nothing written) when no other spec exists, since a re-scaffold
+  would re-seed the genesis. `--dry-run` prints the plan and writes nothing.
+  When the first non-genesis spec rolls up to `DONE`, `transition` prints a
+  one-line hint naming this command (stderr, non-blocking, once).
 - Guards the status board via `workflow.py check-board <project-dir>` — a
   read-only audit that exits non-zero when `docs/specs/README.md` no longer
   matches the spec records, or when two spec directories claim one number.

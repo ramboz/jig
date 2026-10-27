@@ -267,6 +267,17 @@ class GenesisPointerTests(_Tmp):
                       (self.target / "CLAUDE.md").read_text())
         self._assert_no_dangling()
 
+    def test_existing_000_without_seed_frontmatter_is_not_pointed_at(self):
+        # Slice 121-02: one genesis predicate for scaffold, retire-genesis and
+        # the hint — a user's own `000-adopt-jig` is not the jig seed.
+        g = self.target / "docs/specs/000-adopt-jig"
+        g.mkdir(parents=True)
+        (g / "spec.md").write_text("---\nstatus: DRAFT\n---\n\n# Mine\n")
+        self.scaffold("--force")
+        self.assertNotIn("adopt-jig",
+                         (self.target / "CLAUDE.md").read_text())
+        self._assert_no_dangling()
+
 
 if __name__ == "__main__":
     unittest.main()

@@ -352,7 +352,7 @@
 | [118-behavioral-verification-pilot](118-behavioral-verification-pilot/spec.md) | 118-01 -- author-to-review | **DONE** |  |
 | [120-generic-design-attestation](120-generic-design-attestation/spec.md) | 120-01 — attest generic static evidence | **DONE** |  |
 | [121-genesis-spec-zero](121-genesis-spec-zero/spec.md) | 121-01 — genesis-seed | **DONE** |  |
-| [121-genesis-spec-zero](121-genesis-spec-zero/spec.md) | 121-02 — retire-genesis | READY_FOR_IMPLEMENTATION |  |
+| [121-genesis-spec-zero](121-genesis-spec-zero/spec.md) | 121-02 — retire-genesis | RECONCILED (claude/jig-spec-scaffolding…) |  |
 
 ## Deferred slices
 
@@ -396,7 +396,7 @@ Advisory (ADR-0040 auditability — never blocks). Regenerated from `reviews/sli
 
 - **0** pass(es) recorded `not-shown` (selection step did not run — the kill-criterion-1 defect signal).
 - **25** pass(es) recorded `non-interactive` (declared no-orchestrator / CI).
-- **16** shown-and-declined anomaly(ies) (a high-confidence richer skill was shown and not applied):
+- **17** shown-and-declined anomaly(ies) (a high-confidence richer skill was shown and not applied):
   - `088-project-orientation/slice-02-arch.md` — applied `none`; declined: arch-review
   - `088-project-orientation/slice-02-craft.md` — applied `none`; declined: arch-review, independent-review, pr-review, scout-pr-review
   - `113-copilot-third-host/slice-02-arch.md` — applied `none`; declined: arch-review
@@ -413,3 +413,4 @@ Advisory (ADR-0040 auditability — never blocks). Regenerated from `reviews/sli
   - `118-behavioral-verification-pilot/slice-01-craft.md` — applied `pr-review`; declined: arch-review, independent-review, scout-pr-review
   - `120-generic-design-attestation/slice-01-craft.md` — applied `scout-pr-review`; declined: arch-review, independent-review, pr-review
   - `121-genesis-spec-zero/slice-01-craft.md` — applied `pr-review`; declined: arch-review, independent-review, scout-pr-review
+  - `121-genesis-spec-zero/slice-02-craft.md` — applied `pr-review`; declined: arch-review, independent-review, scout-pr-review

@@ -1480,3 +1480,14 @@ acts and *where*: "Install it" invites an in-sandbox install attempt.
 
 ## Alias identity needs the complete interpreter chain
 Literal readlink identity is insufficient when a selected interpreter alias can traverse an undeclared intermediate symlink. In spec120 compliance, python -> hop -> python-real could remain text-identical while hop changed. Require a bounded acyclic chain through explicitly selected aliases to the pinned canonical interpreter; keep ordinary file references no-follow. Regression coverage lives in skills/_common/test_static_design_bindings.py. This is trusted-local identity checking, not a claim about a hostile host.
+
+## Spec 121: lifecycle writes during a full-suite run stale the repo board
+
+`scripts/test_board_integrity.py` checks the repo's own `docs/specs/README.md`
+against the spec records. Any `transition`, and any `review.py record-review`
+(the board's shown-and-declined anomaly count reads the review files), made
+while `run_tests.py` is running leaves the board stale and fails both
+board-integrity tests. The code may be fine. Spec 121 hit this twice. Either
+batch transitions and verdict recording until the suite finishes, or
+regenerate the board and re-run only `test_board_integrity` afterwards. The
+second option is valid only when the code is unchanged since the suite run.
