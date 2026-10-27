@@ -197,7 +197,7 @@ class SliceAuthoringReferenceAnchorTests(unittest.TestCase):
     that (a) names no root and (b) is mislocated post-ship: scaffold copies
     `templates/` to `<project>/.claude/templates/`, so the project-root path
     the wording implies does not exist inside a scaffolded repo. The authoritative
-    structural reference is the scaffolded first spec `docs/specs/001-adopt-jig/`,
+    structural reference is the scaffolded genesis spec `docs/specs/000-adopt-jig/`,
     which lands at project root (host-agnostic) and is named "the worked example
     to imitate" by the scaffolded `CLAUDE.md`."""
 
@@ -221,10 +221,10 @@ class SliceAuthoringReferenceAnchorTests(unittest.TestCase):
         # The in-project, host-agnostic worked example is the structural
         # reference authors should mirror.
         self.assertIn(
-            "001-adopt-jig", self.body,
+            "000-adopt-jig", self.body,
             "SKILL.md slice-authoring guidance must cite the in-project "
-            "scaffolded worked example `docs/specs/001-adopt-jig/` as the "
-            "structural reference (bug 027 / issue 173)",
+            "genesis spec `docs/specs/000-adopt-jig/` as the structural "
+            "reference (bug 027 / issue 173, ADR-0067)",
         )
 
 

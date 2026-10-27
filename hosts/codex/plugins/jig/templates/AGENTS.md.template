@@ -21,7 +21,7 @@ Always-loaded primer, kept lean per jig's context-cost discipline. This is an **
 - More terms belong in [docs/memory/glossary.md](docs/memory/glossary.md), not in this primer.
 
 ### Active specs
-- [001-adopt-jig](docs/specs/001-adopt-jig/spec.md) - DONE worked example to imitate; see [docs/specs/README.md](docs/specs/README.md) for the status board.
+{{GENESIS_PRIMER_LINE}}
 
 ### Deferred decisions
 - See [docs/refinement-todo.md](docs/refinement-todo.md).

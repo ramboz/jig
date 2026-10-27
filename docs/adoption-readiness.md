@@ -97,10 +97,10 @@ why it is opt-in rather than the default.
    The skills and hooks run from the installed plugin; add `--in-repo` to copy
    them into `.claude/` or `.codex/` instead. The closing summary names which
    mode ran.
-2. **Read the worked example** — a fresh scaffold seeds
-   `docs/specs/001-adopt-jig/` (a `DONE` reference spec to imitate) plus a
-   `002-first-spec` `DRAFT` stub. Skim `001-adopt-jig` to see the shape of a
-   finished slice.
+2. **Read the worked example** — a fresh scaffold seeds the genesis spec
+   `docs/specs/000-adopt-jig/` (a `DONE` reference spec to imitate), so your
+   own first spec is `001`. Skim it to see the shape of a finished slice; once
+   you have specs of your own, `workflow.py retire-genesis` removes it.
 3. **Set your vision** — run `/jig:vision-elicitation` to fill in
    `docs/product-vision.md` and `docs/architecture.md` (or fill them by
    hand). This is what every later slice is judged against.

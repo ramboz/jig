@@ -4,7 +4,7 @@ dependencies: []
 last_verified:
 ---
 
-## Slice 001-01 — bootstrap
+## Slice 000-01 — bootstrap
 
 **Goal:** Adopt jig in {{PROJECT_NAME}} by running `scaffold-init`, so the
 project opens with the jig docs tree, an honest CLAUDE.md, a populated
@@ -28,30 +28,30 @@ spec-driven loop from turn one.
    the project root, carries the jig watermark, and points at the docs
    above without claiming work that has not happened.
 3. **The status board is populated.** `docs/specs/README.md` contains a
-   real row for `001-01 — bootstrap` marked `DONE`.
-4. **A next step exists.** `docs/specs/002-first-spec/spec.md` is present
-   as a `DRAFT` stub telling the reader to replace it with their first
-   real spec.
-5. **The seed is well-formed.** The emitted `001-adopt-jig` and
-   `002-first-spec` specs follow jig's spec/slice structure and validated
-   clean when scaffolded. (Structural linting runs in jig's own dev/CI
-   environment — the scaffolded project does not ship `spec_lint.py`.)
+   real row for `000-01 — bootstrap` marked `DONE`.
+4. **A next step exists.** The next step is
+   `/jig:spec-workflow new <slug>`, which reserves your first real spec
+   (`001`).
+5. **The seed is well-formed.** The emitted `000-adopt-jig` spec follows
+   jig's spec/slice structure and validated clean when scaffolded.
+   (Structural linting runs in jig's own dev/CI environment — the
+   scaffolded project does not ship `spec_lint.py`.)
 
 **DoD:**
 - [x] All ACs pass — Verified by scaffold-completion check (deterministic
-      template output; first subagent review is your spec 002).
+      template output; first subagent review is your first spec (001)).
 - [x] Implementer test coverage exercises each AC — Verified by
       scaffold-completion check (the scaffold's own test suite asserts the
       emitted tree; this slice ships no new test of its own).
 - [x] Reviewer-subagent review — not applicable: deterministic template
       output, nothing authored to review. Your first subagent review is
-      spec 002.
+      your first spec (001).
 - [x] Implementation review — satisfied by the scaffold-completion check
       (deterministic output, not a subagent verdict).
 - [x] Deviation log produced under this slice heading.
 - [ ] Reconciliation review passed.
 - [x] `docs/refinement-todo.md` updated if any decisions were deferred —
-      none were; the stub doc is in place.
+      none were.
 
 **Anti-horizontal-phasing check:** After this slice lands, a developer
 opening {{PROJECT_NAME}} finds a complete `DONE` worked example *and* a
@@ -71,4 +71,4 @@ The original spec is preserved above. Implementation notes:
    reviewing template copies with a subagent would be rubber-stamp
    theater. The review boxes above are annotated as verified by the
    scaffold-completion check accordingly. Your first *real* subagent
-   review is spec 002, where there is genuine implementation to inspect.
+   review is your first spec (001), where there is genuine implementation to inspect.

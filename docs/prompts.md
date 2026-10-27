@@ -40,7 +40,7 @@ Equivalent explicit command:
 workflow), a host primer (`CLAUDE.md` or `AGENTS.md`), and — in the default
 scaffold mode — its skills, hooks, and host config into `.claude/` or `.codex/`.
 A greenfield repo is also seeded with a worked-example spec
-(`docs/specs/001-adopt-jig`, already DONE) plus a `002-first-spec` DRAFT stub,
+(the genesis spec `docs/specs/000-adopt-jig`, already DONE, so your first spec is `001`),
 and the run ends with a "scaffold complete and verified" check.
 
 **Then set your vision** — this is what every later slice is judged against:

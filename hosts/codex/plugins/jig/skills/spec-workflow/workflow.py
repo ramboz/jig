@@ -1642,6 +1642,10 @@ def transition(spec_md: Path, slice_fragment: str, new_status: str, *,
     # file-per-slice ones.
     # Slice 032-01: atomic via _common.atomic_io to avoid torn writes on
     # interrupted transitions.
+    try:  # Slice 121-02: remember the pre-write rollup for the first-done hint
+        prior_rollup = compute_spec_status(spec_md)
+    except Exception:
+        prior_rollup = ""
     atomic_write_text(loc.path, new_text)
 
     # Slice 030-01: roll up spec.md's frontmatter `status:` from the
@@ -1649,6 +1653,14 @@ def transition(spec_md: Path, slice_fragment: str, new_status: str, *,
     # what's already in spec.md (or when spec.md has no frontmatter).
     # Ordered AFTER the slice write so the rollup reflects the new state.
     _write_spec_rollup(spec_md)
+
+    # Slice 121-02 AC5: non-blocking first-done hint (never alters the result).
+    if new_status == "DONE" and prior_rollup != "DONE":
+        try:
+            if compute_spec_status(spec_md) == "DONE":
+                _genesis_first_done_hint(spec_md)
+        except Exception:
+            pass
 
     # Slice 056-03: when a slice begins, stamp the working-tree-local
     # `.jig/spec-ref` attribution marker. Ordered AFTER all status writes
@@ -5636,6 +5648,213 @@ def _append_release_log(section: str, released_from: str, reason: str) -> str:
 # ---------- end slice 049-01 ----------
 
 
+# ---------------------------------------------------------------------------
+# Slice 121-02 / ADR-0067: retire the genesis spec (`retire-genesis`).
+#
+# Genesis detection keys on directory slug + shape, never the int value. Kept
+# local to this file (ADR-0002: no shared helper for two callers); the same
+# predicate (slug + `skill: scaffold-init` frontmatter, for both `000-` and
+# legacy `001-adopt-jig`) lives in scaffold-init's `_resolve_genesis_dir`.
+# ---------------------------------------------------------------------------
+
+_GENESIS_NEW = "000-adopt-jig"
+_GENESIS_LEGACY = "001-adopt-jig"
+_GENESIS_STUB = "002-first-spec"
+# Content markers of the pre-121 `002-first-spec` seed stub, frozen here (the
+# live template is gone). An untouched stub carries every one of them.
+_STUB_MARKERS = (
+    "# Spec 002: First spec — replace me",
+    "**Replace this with your first real spec.**",
+    "## Slice 002-01 — replace-me",
+    "_TODO: describe the first vertical slice._",
+)
+# Inline single-line links only: the scaffolded pointer shapes. Reference-style,
+# angle-bracket and titled links are neither rewritten nor reported.
+_MD_LINK_RE = re.compile(r"\[([^\]\n]*)\]\(([^)\s]+?)(?:#[^)\s]*)?\)")
+_LIST_ITEM_RE = re.compile(r"^(\s*)(?:[-*+]|\d+[.)])\s+")
+_SCAN_SKIP_DIRS = {".git", "node_modules", ".venv", "venv", "__pycache__"}
+
+
+def _genesis_plan(specs: Path):
+    """(removed dirs, kept-and-reported notes, unrecognised notes) for the
+    genesis shapes present in `specs`."""
+    removed, kept, unrecognised = [], [], []
+    new = specs / _GENESIS_NEW
+    if new.is_dir():
+        (removed if _is_seed_spec(new) else unrecognised).append(new)
+    legacy = specs / _GENESIS_LEGACY
+    if legacy.is_dir():
+        if _is_seed_spec(legacy):
+            removed.append(legacy)
+            stub = specs / _GENESIS_STUB
+            if stub.is_dir():
+                if _is_untouched_stub(stub):
+                    removed.append(stub)
+                else:
+                    kept.append(stub)
+        else:
+            unrecognised.append(legacy)
+    return removed, kept, unrecognised
+
+
+def _is_seed_spec(spec_dir: Path) -> bool:
+    """A genesis dir is the jig seed only if its frontmatter says
+    `skill: scaffold-init` (a user's own `000-`/`001-adopt-jig` is left be)."""
+    spec_md = spec_dir / "spec.md"
+    if not spec_md.is_file():
+        return False
+    fields, _ = parse_frontmatter(spec_md.read_text(errors="replace"))
+    return fields.get("skill") == "scaffold-init"
+
+
+def _is_untouched_stub(stub: Path) -> bool:
+    if sorted(c.name for c in stub.iterdir()) != ["spec.md"]:
+        return False
+    text = (stub / "spec.md").read_text(errors="replace")
+    fields, _ = parse_frontmatter(text)
+    return (fields.get("status") == "DRAFT"
+            and all(m in text for m in _STUB_MARKERS))
+
+
+def _link_into(removed: list, base: Path, target: str) -> bool:
+    if re.match(r"^[a-zA-Z][a-zA-Z0-9+.-]*:", target) or target.startswith("/"):
+        return False
+    resolved = Path(os.path.normpath(base / target))
+    return any(resolved == r or r in resolved.parents for r in removed)
+
+
+def _rewrite_genesis_links(text: str, file_dir: Path, removed: list):
+    """Drop list items whose first link targets a removed dir (with their
+    continuation lines); backtick the text of any other such link."""
+    lines = text.splitlines(keepends=True)
+    out, i = [], 0
+
+    def into(t):
+        return _link_into(removed, file_dir, t)
+
+    def sub(m):
+        return f"`{m.group(1)}`" if into(m.group(2)) else m.group(0)
+
+    while i < len(lines):
+        m = _LIST_ITEM_RE.match(lines[i])
+        if m:
+            indent = len(m.group(1))
+            j = i + 1
+            # Continuation lines only: a nested list item is its own item, so
+            # a child's link never deletes its parent or siblings.
+            while (j < len(lines) and lines[j].strip()
+                   and len(lines[j]) - len(lines[j].lstrip()) > indent
+                   and not _LIST_ITEM_RE.match(lines[j])):
+                j += 1
+            first = _MD_LINK_RE.search("".join(lines[i:j]))
+            if first and into(first.group(2)):
+                i = j
+                continue
+        out.append(_MD_LINK_RE.sub(sub, lines[i]))
+        i += 1
+    return "".join(out)
+
+
+def retire_genesis(project_dir: Path, dry_run: bool = False) -> str:
+    """Remove the seeded genesis spec (new `000-adopt-jig` or legacy
+    `001-adopt-jig` [+ untouched `002-first-spec` stub]), rewrite the pointer
+    files that link it, regenerate the board, and report other links."""
+    project_dir = Path(project_dir).resolve()
+    specs = project_layout.specs_dir(project_dir)
+    base = project_layout.docs_base(project_dir)
+    removed, kept, unrecognised = _genesis_plan(specs) if specs.is_dir() else ([], [], [])
+    lines = []
+
+    def rel(p):
+        try:
+            return str(Path(p).relative_to(project_dir))
+        except ValueError:
+            return str(p)
+
+    for u in unrecognised:
+        lines.append(f"{rel(u)}: not recognised as the jig seed; left in place")
+    if not removed:
+        lines.append("nothing to retire: no genesis spec present")
+        return "\n".join(lines) + "\n"
+
+    remaining = [d for d in sorted(specs.iterdir())
+                 if d.is_dir() and (d / "spec.md").is_file() and d not in removed]
+    if not remaining:
+        raise WorkflowError(
+            "retire-genesis refused: no spec other than the genesis seed "
+            "exists. Write your first spec first (`workflow.py new <slug>`), "
+            "otherwise a re-scaffold would seed the genesis spec again.")
+
+    scope = [project_dir / "CLAUDE.md", project_dir / "AGENTS.md",
+             base / "adoption-readiness.md"]
+    scope += [k / "spec.md" for k in kept]
+    rewrites = {}
+    for f in scope:
+        if f.is_file():
+            old = f.read_text(errors="replace")
+            new = _rewrite_genesis_links(old, f.parent, removed)
+            if new != old:
+                rewrites[f] = new
+
+    reported = []
+    for dirpath, dirnames, filenames in os.walk(base):
+        dirnames[:] = sorted(
+            d for d in dirnames if d not in _SCAN_SKIP_DIRS
+            and Path(dirpath, d) not in removed)
+        for fn in sorted(filenames):
+            f = Path(dirpath, fn)
+            # The status board is regenerated below, so its rows are not
+            # links left in place.
+            if not fn.endswith(".md") or f in scope or f == specs / "README.md":
+                continue
+            for n, ln in enumerate(f.read_text(errors="replace").splitlines(), 1):
+                for m in _MD_LINK_RE.finditer(ln):
+                    if _link_into(removed, f.parent, m.group(2)):
+                        reported.append(f"{rel(f)}:{n}: {m.group(0)}")
+
+    verb = "would remove" if dry_run else "removed"
+    for d in removed:
+        lines.append(f"{verb}: {rel(d)}")
+    for k in kept:
+        lines.append(f"kept (edited or extra files): {rel(k)}")
+    verb = "would rewrite" if dry_run else "rewrote"
+    for f in rewrites:
+        lines.append(f"{verb}: {rel(f)}")
+    for r in reported:
+        lines.append(f"link into removed spec (reported, not rewritten): {r}")
+
+    if not dry_run:
+        # Pointers first: a failed write leaves the genesis spec in place
+        # rather than links into a removed directory.
+        for f, new in rewrites.items():
+            atomic_write_text(f, new)
+        for d in removed:
+            shutil.rmtree(d)
+        if (specs / "README.md").is_file():
+            regenerate_status_board(project_dir)
+            lines.append("regenerated status board")
+    return "\n".join(lines) + "\n"
+
+
+def _genesis_first_done_hint(spec_md: Path) -> None:
+    """Slice 121-02 AC5: after a spec's rollup became DONE, print one line
+    naming `retire-genesis` when a genesis spec is present and this is the
+    only non-genesis spec at DONE. Caller swallows every failure."""
+    specs = spec_md.parent.parent
+    removed, _, _ = _genesis_plan(specs)
+    if not removed or spec_md.parent in removed:
+        return
+    done = [d for d in sorted(specs.iterdir())
+            if d.is_dir() and (d / "spec.md").is_file() and d not in removed
+            and d.name != _GENESIS_STUB
+            and compute_spec_status(d / "spec.md") == "DONE"]
+    if done == [spec_md.parent]:
+        sys.stderr.write(
+            "hint: your first spec is DONE; the seeded genesis spec can now be "
+            "removed with `workflow.py retire-genesis` (add --dry-run to "
+            "preview).\n")
+
+
 def _build_parser() -> argparse.ArgumentParser:
     p = argparse.ArgumentParser(prog="workflow.py",
                                 description="jig spec-workflow helper")
@@ -5856,6 +6075,17 @@ def _build_parser() -> argparse.ArgumentParser:
                      help="compact view: the totals line, the use cases "
                           "with no done slice or no spec, and the "
                           "Unanchored specs (slice 116-02)")
+
+    prg = sub.add_parser(
+        "retire-genesis",
+        help="remove the seeded genesis spec (000-adopt-jig, or legacy "
+             "001-adopt-jig + untouched 002-first-spec) and its pointers "
+             "(slice 121-02)",
+    )
+    prg.add_argument("--project-dir", default=".",
+                     help="project root directory (default: cwd)")
+    prg.add_argument("--dry-run", action="store_true",
+                     help="print what would be removed/rewritten; write nothing")
     return p
 
 
@@ -5926,6 +6156,10 @@ def main(argv: list) -> int:
             # WorkflowError for a finding. Only a genuine error (e.g. an
             # unreadable tree) falls through to the generic handler.
             sys.stdout.write(coverage(Path(ns.project_dir)))
+        elif ns.command == "retire-genesis":
+            sys.stdout.write(
+                retire_genesis(Path(ns.project_dir), dry_run=ns.dry_run)
+            )
         elif ns.command == "progress":
             # Advisory (slice 116-01): same always-exit-0 contract as coverage.
             sys.stdout.write(

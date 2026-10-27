@@ -140,8 +140,9 @@ Every scaffolded doc carries `Status: Draft (wizard-generated)`.
 After scaffolding succeeds, tell the user:
 1. Open `AGENTS.md` and fill in the Hot Cache section with project-specific terms.
 2. Open `docs/refinement-todo.md` to see what was deferred.
-3. The first spec to write is in `docs/specs/` — use `/jig:spec-workflow` (when implemented)
-   or write `docs/specs/001-<feature>/spec.md` by hand.
+3. Your first spec will be `001` — reserve it with `/jig:spec-workflow new <slug>`
+   (or write `docs/specs/001-<feature>/spec.md` by hand). The scaffold seeds only the
+   genesis worked example `000-adopt-jig`; there is no placeholder spec to replace.
 4. **Note:** `docs/conventions.md` is now gated. Edits require
    `JIG_CONVENTIONS_APPROVED=1` in the shell session.
 

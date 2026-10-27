@@ -1267,7 +1267,7 @@ class BlockedSlicesBoardTests(unittest.TestCase):
 
     def _row_for(self, rows, spec_dir):
         """Filter `collect_slices` rows to the given spec_dir — scaffold
-        seeds baseline demo specs (001-adopt-jig, 002-first-spec), so an
+        seeds baseline demo specs (000-adopt-jig), so an
         exact-length assertion on the raw list is not portable."""
         matches = [r for r in rows if r[0] == spec_dir]
         self.assertEqual(len(matches), 1, f"expected exactly 1 row for "

@@ -3272,13 +3272,66 @@ def _specs_dir_has_content(target: Path, docs_root: str = "docs") -> bool:
     return False
 
 
+_GENESIS_SLUG = "adopt-jig"
+
+
+def _resolve_genesis_dir(target: Path, docs_root: str = "docs"):
+    """Name of the genesis spec directory the rendered pointers must link, or
+    None (ADR-0067 decision 4 invariant, slice 121-01). Decided BEFORE the
+    primers render. Greenfield-ness uses `_emit_seed_spec`'s predicate; an
+    existing genesis uses `workflow.py retire-genesis`'s (slug + frontmatter):
+
+      - greenfield (`_specs_dir_has_content` False) -> this run emits
+        `000-adopt-jig`;
+      - else `000-adopt-jig`, then the legacy `001-adopt-jig`, each
+        recognised by slug + `skill: scaffold-init` frontmatter (never by
+        int value) -> it;
+      - else None (no genesis spec: render no pointer)."""
+    if not _specs_dir_has_content(target, docs_root):
+        return f"000-{_GENESIS_SLUG}"
+    specs = _scaffold_docs_base(target, docs_root) / "specs"
+    # Same predicate as `workflow.py retire-genesis` (slice 121-02): slug +
+    # `skill: scaffold-init` frontmatter, so a user's own `000-`/`001-adopt-jig`
+    # is never pointed at as the worked example.
+    for n in ("000", "001"):
+        spec_md = specs / f"{n}-{_GENESIS_SLUG}" / "spec.md"
+        if spec_md.is_file():
+            fields, _ = parse_frontmatter(spec_md.read_text(errors="replace"))
+            if fields.get("skill") == "scaffold-init":
+                return f"{n}-{_GENESIS_SLUG}"
+    return None
+
+
+def _genesis_pointer_substitutions(genesis_dir) -> dict:
+    """`{{GENESIS_*}}` substitutions for the primers and adoption-readiness,
+    expanding to the whole pointer line/item (or a pointer-free fallback)."""
+    if genesis_dir:
+        primer = (f"- [{genesis_dir}](docs/specs/{genesis_dir}/spec.md) - DONE "
+                  "worked example to imitate; see "
+                  "[docs/specs/README.md](docs/specs/README.md) for the "
+                  "status board.")
+        item = ("1. **Read the worked example** — your scaffold seeded a "
+                "`DONE` reference\n   spec, "
+                f"[{genesis_dir}](specs/{genesis_dir}/spec.md). Skim it to "
+                "see the\n   shape of a finished slice, then check the\n"
+                "   [status board](specs/README.md).")
+    else:
+        primer = ("- See [docs/specs/README.md](docs/specs/README.md) for the "
+                  "status board.")
+        item = ("1. **Read the status board** — check the\n"
+                "   [status board](specs/README.md) and any `DONE` slice to "
+                "see the\n   shape of a finished slice.")
+    return {"GENESIS_PRIMER_LINE": primer, "GENESIS_READINESS_ITEM": item}
+
+
 def _emit_seed_spec(template_root: Path, target: Path, subs: dict,
                     docs_root: str = "docs", host_rewrite=None) -> None:
     """Emit the worked-example reference spec (slice 048-05) into a
     greenfield `docs/specs/`:
 
-      - `001-adopt-jig/spec.md` + `slice-01-bootstrap.md` (status: DONE),
-      - `002-first-spec/spec.md` (status: DRAFT hand-off stub),
+      - `000-adopt-jig/spec.md` + `slice-01-bootstrap.md` (status: DONE) —
+        the genesis spec (ADR-0067); no placeholder spec, so the project's
+        own first spec is `001`,
       - a populated `docs/specs/README.md` status board.
 
     Greenfield-only (Clarification Q1): if `docs/specs/` already has spec
@@ -3307,7 +3360,7 @@ def _emit_seed_spec(template_root: Path, target: Path, subs: dict,
         dst_name = rel.with_suffix("")  # strip .template, leaves .md
         # The seed's README.md.template overwrites the empty status board
         # emitted by the generic doc copy (step 2); the spec/slice files
-        # land in their 001-adopt-jig / 002-first-spec subdirs.
+        # land in their 000-adopt-jig subdir.
         dst = specs_dst / dst_name
         copy_template(src, dst, subs, post_render=seed_rewrite,
                       pre_render=host_rewrite)
@@ -3858,6 +3911,10 @@ def scaffold(target: Path, plugin: Path, *, force: bool = False,
         "JIG_VERSION": jig_version,
         "TIMESTAMP": timestamp,
         **renderer.phase_mode_substitutions(),
+        # Slice 121-01: pointers follow the seed — resolved before the primers
+        # render, with the same greenfield predicate the seed uses.
+        **_genesis_pointer_substitutions(
+            _resolve_genesis_dir(target, docs_root)),
     }
 
     # Slice 046-01: in scaffold (in-repo) mode the runtime machinery is
@@ -3930,8 +3987,8 @@ def scaffold(target: Path, plugin: Path, *, force: bool = False,
         dst = docs_dst_base / dst_name
         copy_template(src, dst, subs, post_render=doc_rewrite)
 
-    # 2b. Slice 048-05: emit the seed reference spec (001-adopt-jig +
-    # 002-first-spec stub + populated status board) into a greenfield
+    # 2b. Slice 048-05: emit the seed reference spec (000-adopt-jig genesis
+    # spec + populated status board, ADR-0067) into a greenfield
     # docs/specs/. Greenfield-only (Clarification Q1): skipped silently
     # when any spec already exists, so a migrate path / --force re-scaffold
     # never overwrites the user's work.

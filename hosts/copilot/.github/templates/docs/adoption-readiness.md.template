@@ -31,16 +31,14 @@ jig works best when these hold. Treat it as a post-scaffold sanity check:
 
 ## Your first 30 minutes
 
-1. **Read the worked example** — your scaffold seeded a `DONE` reference
-   spec, [001-adopt-jig](specs/001-adopt-jig/spec.md). Skim it to see the
-   shape of a finished slice, then check the
-   [status board](specs/README.md).
+{{GENESIS_READINESS_ITEM}}
 2. **Set your vision** — run `/jig:vision-elicitation` to fill in
    [product-vision.md](product-vision.md) and
    [architecture.md](architecture.md) (or fill them by hand). This is what
    every later slice is judged against.
-3. **Cut your first spec** — `/jig:spec-workflow new <slug>`, then
-   SPIDR-split it into thin vertical slices.
+3. **Cut your first spec** — `/jig:spec-workflow new <slug>` (in a freshly
+   scaffolded project it is spec `001`), then SPIDR-split it into thin
+   vertical slices.
 4. **Run one slice end to end** — implement → independent review →
    reconcile → DONE. The full lifecycle lives in [workflow.md](workflow.md).
 

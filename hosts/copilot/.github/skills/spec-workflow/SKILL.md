@@ -57,6 +57,21 @@ user-invocable: true
   (totals, use cases with no done slice or no spec, Unanchored specs; slice
   116-02). No-op when the project has no `## Use cases` section or its marker
   says `status: unfilled` / `skipped` (not elicited yet).
+- Retires the seeded genesis spec via `workflow.py retire-genesis [--project-dir DIR] [--dry-run]`
+  (slice 121-02, [ADR-0067](../../docs/decisions/adr-0067-genesis-spec-zero.md)).
+  It removes `000-adopt-jig/` (new shape) or, in the legacy shape, `001-adopt-jig/`
+  (either one only when its frontmatter has `skill: scaffold-init`; otherwise reported
+  "not recognised as the jig seed; left in place") plus the legacy `first-spec` stub dir only while it is an untouched
+  stub (only `spec.md`, still `DRAFT`, with the seed's heading, lead, slice
+  heading and `_TODO_` placeholder intact; otherwise kept and reported). It
+  deletes the primer / `adoption-readiness.md` list items that point at the
+  removed spec, backticks any other link in `AGENTS.md`, `AGENTS.md`,
+  `adoption-readiness.md` and a kept stub, and regenerates the board. Links
+  from your own files are **reported, never rewritten**. It **refuses**
+  (non-zero, nothing written) when no other spec exists, since a re-scaffold
+  would re-seed the genesis. `--dry-run` prints the plan and writes nothing.
+  When the first non-genesis spec rolls up to `DONE`, `transition` prints a
+  one-line hint naming this command (stderr, non-blocking, once).
 - Guards the status board via `workflow.py check-board <project-dir>` — a
   read-only audit that exits non-zero when `docs/specs/README.md` no longer
   matches the spec records, or when two spec directories claim one number.
@@ -277,10 +292,11 @@ SKILL.md hand-off is the documented gate.
    `slice-01-tbd.md` from the packaged slice template, so you never hand-resolve
    a template path; add any further slices in that same shape. For the
    **structural reference** — what a filled-in slice looks like — mirror the
-   in-project worked example that scaffolding installs at project root:
-   `docs/specs/001-adopt-jig/` (`spec.md` + `slice-01-bootstrap.md`), the first
-   spec, which your project's `AGENTS.md` names as the worked example to
-   imitate. Set `status: DRAFT` in the frontmatter. Legacy slices that use prose
+   exemplar resolved by state: the genesis spec scaffolding installed
+   (`docs/specs/000-adopt-jig/`, or `001-adopt-jig/` in projects scaffolded
+   before spec 121) if present — your project's `AGENTS.md` names it — otherwise
+   any `DONE` slice in your project; the `workflow.py new` starter is the shape
+   of last resort. Set `status: DRAFT` in the frontmatter. Legacy slices that use prose
    `**STATUS: DRAFT**` markers still work (lazy migration); no need to rewrite
    them.
 5a. **Design-fidelity authoring nudge (spec 104-02 / ADR-0049).** When a
@@ -852,7 +868,9 @@ New slices are whole-file templates — frontmatter at the top, `## Slice ...`
 heading immediately following the closing frontmatter delimiter. `workflow.py
 new` emits a starter `slice-01-tbd.md` alongside `spec.md` in this
 shape (from the packaged slice template); for a filled-in reference, mirror the
-scaffolded worked example `docs/specs/001-adopt-jig/slice-01-bootstrap.md`.
+genesis spec's slice (`docs/specs/000-adopt-jig/slice-01-bootstrap.md`, or
+`001-adopt-jig/` in projects scaffolded before spec 121) if present, otherwise
+any `DONE` slice in your project.
 Legacy specs that embed `## Slice` sections inside `spec.md`
 (heading-first, frontmatter-after) remain supported by every helper —
 no forced migration.
