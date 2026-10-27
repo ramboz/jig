@@ -1,5 +1,21 @@
 # Changelog
 
+## [2.17.0](https://github.com/ramboz/jig/compare/v2.16.2...v2.17.0) (2026-10-27)
+
+
+### Features
+
+* **independent-review:** attest generic static design evidence ([#246](https://github.com/ramboz/jig/issues/246)) ([3383e59](https://github.com/ramboz/jig/commit/3383e59cfb23ae0fdfc2336ba132877a378f5637))
+* **scaffold-init:** genesis spec 000, no 002 stub, and retire-genesis ([#247](https://github.com/ramboz/jig/issues/247)) ([1ccd3cd](https://github.com/ramboz/jig/commit/1ccd3cdd10d6f59999f989b41786b4c7dcfca59b))
+* **spec-workflow:** add behavioral rules and runtime verification ([#241](https://github.com/ramboz/jig/issues/241)) ([e3fb128](https://github.com/ramboz/jig/commit/e3fb1283a75131e4bc80e3aaf0bd019389d5a3df))
+
+
+### Documentation
+
+* **decisions:** reserve adr-0067-genesis-spec-zero ([946c00e](https://github.com/ramboz/jig/commit/946c00e415d37532ef3f34c9b4d788f784ebfbc2))
+* **specs:** reserve 117-decision-rulings-in-context ([e6112bf](https://github.com/ramboz/jig/commit/e6112bfcf05683c5f3d1c959f53967c4cf0966c9))
+* **specs:** reserve 121-genesis-spec-zero ([d2d9189](https://github.com/ramboz/jig/commit/d2d9189992fc22d22ddc42320aaae364a70778d8))
+
 ## [2.16.2](https://github.com/ramboz/jig/compare/v2.16.1...v2.16.2) (2026-10-05)
 
 
