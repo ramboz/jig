@@ -138,12 +138,11 @@ class GreenfieldScaffoldTests(unittest.TestCase):
     def test_draft_markers(self):
         marker = "Status: Draft (wizard-generated)"
         # CLAUDE.md + every .md under docs/, EXCEPT the seeded reference
-        # spec (slice 048-05). The seed's 001-adopt-jig is real, permanent
-        # project history at status: DONE, and its 002-first-spec stub is a
-        # status: DRAFT spec — neither carries the "wizard-generated" doc
-        # marker by design (the honesty pin in 048-05 AC #2 forbids dressing
+        # spec (slice 048-05). The seed's 000-adopt-jig genesis spec is real
+        # project history at status: DONE and does not carry the
+        # "wizard-generated" doc marker by design (the honesty pin in 048-05 AC #2 forbids dressing
         # the DONE worked example up as a draft).
-        seed_dirs = {"001-adopt-jig", "002-first-spec"}
+        seed_dirs = {"000-adopt-jig"}
         # docs/governance.md (slice 106-01 / ADR-0051) is authoritative
         # scaffolded policy — the surface-and-stop routing rule + the
         # branch-protection arming checklist — NOT a wizard-generated stub the
@@ -1845,8 +1844,7 @@ class TierSkillSetTests(unittest.TestCase):
 
 class SeedReferenceSpecTests(unittest.TestCase):
     """Slice 048-05 — scaffold-init seeds a complete DONE worked-example
-    spec (001-adopt-jig) plus a DRAFT hand-off stub (002-first-spec) and a
-    populated status board, honest-by-construction."""
+    genesis spec (000-adopt-jig, ADR-0067) and a populated status board, honest-by-construction."""
 
     def setUp(self):
         self.tmpdir = tempfile.mkdtemp(prefix="jig-seed-")
@@ -1866,22 +1864,22 @@ class SeedReferenceSpecTests(unittest.TestCase):
         return (self.target / rel).read_text()
 
     # AC #1 — the worked-example spec is emitted, slice at status: DONE.
-    def test_seed_001_files_exist_with_done_slice(self):
-        spec = self.target / "docs/specs/001-adopt-jig/spec.md"
-        slice_file = self.target / "docs/specs/001-adopt-jig/slice-01-bootstrap.md"
-        self.assertTrue(spec.is_file(), "001-adopt-jig/spec.md missing")
+    def test_seed_000_files_exist_with_done_slice(self):
+        spec = self.target / "docs/specs/000-adopt-jig/spec.md"
+        slice_file = self.target / "docs/specs/000-adopt-jig/slice-01-bootstrap.md"
+        self.assertTrue(spec.is_file(), "000-adopt-jig/spec.md missing")
         self.assertTrue(slice_file.is_file(), "slice-01-bootstrap.md missing")
         # Slice frontmatter is status: DONE.
         self.assertRegex(
             slice_file.read_text(), r"(?m)^status:\s*DONE\s*$",
             "bootstrap slice must be status: DONE",
         )
-        self.assertIn("## Slice 001-01 — bootstrap", slice_file.read_text())
+        self.assertIn("## Slice 000-01 — bootstrap", slice_file.read_text())
 
     # AC #2 — honesty pin: review line references the deterministic check,
     # and there is NO fabricated subagent verdict string.
     def test_seed_review_line_is_honest(self):
-        body = self._read("docs/specs/001-adopt-jig/slice-01-bootstrap.md")
+        body = self._read("docs/specs/000-adopt-jig/slice-01-bootstrap.md")
         self.assertIn("scaffold-completion check", body,
                       "review boxes must be annotated as verified by the "
                       "deterministic scaffold-completion check")
@@ -1897,35 +1895,22 @@ class SeedReferenceSpecTests(unittest.TestCase):
                 f"seed must not fabricate a subagent verdict ({forbidden!r})",
             )
 
-    # AC #5 — the 002 hand-off stub exists at status: DRAFT (not READY).
-    def test_seed_002_stub_is_draft(self):
-        stub = self.target / "docs/specs/002-first-spec/spec.md"
-        self.assertTrue(stub.is_file(), "002-first-spec/spec.md missing")
-        text = stub.read_text()
-        self.assertRegex(text, r"(?m)^status:\s*DRAFT\s*$",
-                         "002 stub must be status: DRAFT")
-        self.assertNotRegex(
-            text, r"(?m)^status:\s*READY_FOR_IMPLEMENTATION\s*$",
-            "002 stub status must NOT be READY_FOR_IMPLEMENTATION",
-        )
-
-    # AC #4 — the status board has a real, populated 001-01 DONE row.
+    # AC #4 — the status board has a real, populated 000-01 DONE row.
     def test_status_board_has_done_row(self):
         board = self._read("docs/specs/README.md")
-        self.assertIn("001-01 — bootstrap", board)
-        self.assertIn("001-adopt-jig", board)
+        self.assertIn("000-01 — bootstrap", board)
+        self.assertIn("000-adopt-jig", board)
         # The bootstrap row is DONE.
         self.assertRegex(
-            board, r"001-01 — bootstrap.*\*\*DONE\*\*",
-            "status board must mark 001-01 — bootstrap DONE",
+            board, r"000-01 — bootstrap.*\*\*DONE\*\*",
+            "status board must mark 000-01 — bootstrap DONE",
         )
 
     # AC #6 — no plugin-root / source-checkout leakage in the seed.
     def test_seed_has_no_path_leakage(self):
         for rel in (
-            "docs/specs/001-adopt-jig/spec.md",
-            "docs/specs/001-adopt-jig/slice-01-bootstrap.md",
-            "docs/specs/002-first-spec/spec.md",
+            "docs/specs/000-adopt-jig/spec.md",
+            "docs/specs/000-adopt-jig/slice-01-bootstrap.md",
             "docs/specs/README.md",
         ):
             text = self._read(rel)
@@ -1969,7 +1954,7 @@ class SeedGreenfieldGuardTests(unittest.TestCase):
         self.assertEqual(result.returncode, 0, f"stderr: {result.stderr}")
         # The seed must NOT have been emitted.
         self.assertFalse(
-            (self.target / "docs/specs/001-adopt-jig").exists(),
+            (self.target / "docs/specs/000-adopt-jig").exists(),
             "seed must be skipped when docs/specs/ already has content",
         )
         # The user's spec is untouched.
@@ -1979,7 +1964,7 @@ class SeedGreenfieldGuardTests(unittest.TestCase):
         result = run_scaffold(self.target)
         self.assertEqual(result.returncode, 0, f"stderr: {result.stderr}")
         self.assertTrue(
-            (self.target / "docs/specs/001-adopt-jig/spec.md").is_file(),
+            (self.target / "docs/specs/000-adopt-jig/spec.md").is_file(),
             "seed must be emitted into a greenfield docs/specs/",
         )
 
@@ -2034,7 +2019,7 @@ class CompletionVerificationTests(unittest.TestCase):
 
         import verify_install  # noqa: E402
 
-        (self.target / "docs/specs/001-adopt-jig/spec.md").unlink()
+        (self.target / "docs/specs/000-adopt-jig/spec.md").unlink()
         buf = io.StringIO()
         rc = verify_install.run_completion_summary(
             self.target, with_machinery=True, seed_expected=True, out=buf,

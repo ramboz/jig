@@ -13,7 +13,9 @@ Accepted (2026-10-26)
 
 ## Context
 
-A greenfield `scaffold-init` seeds two numbered specs, `001-adopt-jig` (a `DONE` worked example) and `002-first-spec` (a `DRAFT` placeholder), so a project's own first spec is numbered 003.
+The worked example `scaffold-init` seeds moves to a genesis spec `000-adopt-jig` with no placeholder spec, so a project's own first spec is `001` instead of `003`.
+
+Until now a greenfield `scaffold-init` seeded two numbered specs, `001-adopt-jig` (a `DONE` worked example) and `002-first-spec` (a `DRAFT` placeholder).
 
 Slice 048-05 introduced the seed so the first turn has a faithful pattern to
 imitate, and its Clarification Q3 settled `001-adopt-jig` as "permanent honest

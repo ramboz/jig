@@ -536,8 +536,8 @@ def _looks_unscaffolded(project_root: Path) -> bool:
 # ----------------------------------------------------------------------------
 #
 # The worked-example reference spec (slice 048-05) is emitted into a
-# greenfield `docs/specs/` — `001-adopt-jig/` (spec + bootstrap slice),
-# `002-first-spec/` (DRAFT stub), and a populated status board. The
+# greenfield `docs/specs/` — the genesis spec `000-adopt-jig/` (spec +
+# bootstrap slice) and a populated status board (ADR-0067). The
 # completion summary confirms the seed is present so a scaffold that
 # dropped the worked example is reported as a failure (AC #3 / AC #4).
 #
@@ -549,9 +549,8 @@ def _looks_unscaffolded(project_root: Path) -> bool:
 
 
 _EXPECTED_SEED_FILES = (
-    "docs/specs/001-adopt-jig/spec.md",
-    "docs/specs/001-adopt-jig/slice-01-bootstrap.md",
-    "docs/specs/002-first-spec/spec.md",
+    "docs/specs/000-adopt-jig/spec.md",
+    "docs/specs/000-adopt-jig/slice-01-bootstrap.md",
     "docs/specs/README.md",
 )
 
@@ -580,8 +579,8 @@ def _relocate_docs(rel: str, docs_root: str) -> str:
 
 def check_scaffold_seed_present(project_root: Path) -> CheckResult:
     """The slice 048-05 worked-example seed is present under the configured
-    specs dir. A populated status board (`README.md`) plus the `001-adopt-jig`
-    spec/slice and the `002-first-spec` stub must all exist; a scaffold missing
+    specs dir. A populated status board (`README.md`) plus the `000-adopt-jig`
+    genesis spec/slice must all exist; a scaffold missing
     any of them dropped the worked example. Layout-aware (slice 084-03): the
     expected `docs/specs/…` paths relocate to the configured `docs_root`."""
     docs_root = _scaffold_docs_root(project_root)
@@ -625,10 +624,13 @@ def run_completion_summary(
     Slice 047-02 mode-awareness: the `docs` smoke check (AC #4) is ALSO gated
     on `seed_expected`. The scaffolded `CLAUDE.md` / `docs/adoption-readiness
     .md` templates carry relative links INTO the worked-example seed
-    (`docs/specs/001-adopt-jig/...`). Those links resolve iff the seed was
-    emitted, so when the seed is skipped (non-greenfield) they legitimately
-    dangle and must not be reported — exactly the same reasoning that gates
-    the seed check itself. (The standalone `--mode scaffold` verifier —
+    (`docs/specs/000-adopt-jig/...`). Before spec 121 those links resolved
+    iff the seed was emitted, so a skipped seed (non-greenfield) left them
+    dangling. Since slice 121-01 (ADR-0067 decision 4) the pointers follow
+    the genesis spec actually present — `000-adopt-jig`, a legacy
+    `001-adopt-jig`, or none — so they no longer dangle; the gate is kept
+    unchanged because the completion summary is a greenfield check. (The
+    standalone `--mode scaffold` verifier —
     `run_headless_scaffold` — runs `docs` unconditionally; it targets a real
     greenfield scaffold where the seed, and thus the links, are present.)
 

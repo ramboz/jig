@@ -1893,7 +1893,7 @@ class CodexScaffoldAdapterTests(unittest.TestCase):
     def _seed_and_brief_text(self, target: Path) -> str:
         """brief.md plus every seed-spec file, concatenated."""
         parts = [(target / "brief.md").read_text()]
-        seed = target / "docs" / "specs" / "001-adopt-jig"
+        seed = target / "docs" / "specs" / "000-adopt-jig"
         # Assert the seed exists before globbing it. Without this, a regressed
         # seed emission yields an empty glob, and the `AGENTS.md` assertions
         # below would still pass off brief.md alone — the seed half of this

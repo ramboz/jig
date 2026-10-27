@@ -81,7 +81,7 @@ class DotRootEndToEndTests(unittest.TestCase):
         self.assertEqual(scaffold_state.classify_scaffold_state(self.tmp), "scaffolded")
         self.assertEqual(pl.specs_dir(self.tmp), self.tmp / "specs")
         # Seed landed under the collapsed specs dir (AC2 end-to-end).
-        self.assertTrue((self.tmp / "specs" / "001-adopt-jig" / "spec.md").is_file())
+        self.assertTrue((self.tmp / "specs" / "000-adopt-jig" / "spec.md").is_file())
         self.assertTrue((self.tmp / "specs" / "README.md").is_file())
 
     def test_dot_root_primer_links_rewritten_plugin_only(self):
@@ -108,7 +108,7 @@ class DotRootEndToEndTests(unittest.TestCase):
         self.assertEqual(r.returncode, 0, r.stderr)
         workflow.regenerate_status_board(self.tmp)
         board = (self.tmp / "specs" / "README.md").read_text()
-        self.assertIn("001-adopt-jig", board)  # seed rows on the collapsed board
+        self.assertIn("000-adopt-jig", board)  # seed rows on the collapsed board
         self.assertFalse((self.tmp / "docs" / "specs").exists())
 
 

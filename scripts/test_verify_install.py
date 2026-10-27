@@ -1036,11 +1036,9 @@ class SecurityFloorChecksTests(unittest.TestCase):
 def _add_seed(project_root: Path) -> Path:
     """Drop the slice 048-05 worked-example seed files under docs/specs/."""
     specs = project_root / "docs" / "specs"
-    (specs / "001-adopt-jig").mkdir(parents=True, exist_ok=True)
-    (specs / "002-first-spec").mkdir(parents=True, exist_ok=True)
-    (specs / "001-adopt-jig" / "spec.md").write_text("# adopt jig\n")
-    (specs / "001-adopt-jig" / "slice-01-bootstrap.md").write_text("# bootstrap\n")
-    (specs / "002-first-spec" / "spec.md").write_text("# first spec\n")
+    (specs / "000-adopt-jig").mkdir(parents=True, exist_ok=True)
+    (specs / "000-adopt-jig" / "spec.md").write_text("# adopt jig\n")
+    (specs / "000-adopt-jig" / "slice-01-bootstrap.md").write_text("# bootstrap\n")
     (specs / "README.md").write_text("# status board\n")
     return project_root
 
@@ -1061,7 +1059,7 @@ class SeedPresenceCheckTests(unittest.TestCase):
 
         with tempfile.TemporaryDirectory() as td:
             project = _add_seed(Path(td))
-            (project / "docs/specs/001-adopt-jig/slice-01-bootstrap.md").unlink()
+            (project / "docs/specs/000-adopt-jig/slice-01-bootstrap.md").unlink()
             passed, msg = verify_install.check_scaffold_seed_present(project)
             self.assertFalse(passed)
             self.assertIn("slice-01-bootstrap.md", msg)
@@ -1139,7 +1137,7 @@ class CompletionSummaryTests(unittest.TestCase):
         with tempfile.TemporaryDirectory() as td:
             project = _make_fake_scaffold_root(Path(td))
             _add_seed(project)
-            (project / "docs/specs/001-adopt-jig/spec.md").unlink()
+            (project / "docs/specs/000-adopt-jig/spec.md").unlink()
             buf = io.StringIO()
             rc = verify_install.run_completion_summary(
                 project, with_machinery=True, seed_expected=True, out=buf,
