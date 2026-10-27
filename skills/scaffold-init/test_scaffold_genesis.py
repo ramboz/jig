@@ -95,6 +95,10 @@ class GenesisSeedShapeTests(_Tmp):
             capture_output=True)
         env = os.environ.copy()
         env["CLAUDE_PLUGIN_ROOT"] = str(REPO_ROOT)
+        # `new` commits the reservation; CI runners have no git identity.
+        env.update({"GIT_AUTHOR_NAME": "t", "GIT_AUTHOR_EMAIL": "a@b.c",
+                    "GIT_COMMITTER_NAME": "t",
+                    "GIT_COMMITTER_EMAIL": "a@b.c"})
         r = subprocess.run(
             [sys.executable, str(WORKFLOW), "new", "my-feature", "--no-push",
              "--project-dir", str(self.target)],
