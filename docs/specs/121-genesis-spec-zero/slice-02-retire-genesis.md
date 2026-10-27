@@ -1,5 +1,5 @@
 ---
-status: DRAFT
+status: READY_FOR_IMPLEMENTATION
 dependencies: [121-01, adr-0067]
 last_verified:
 frame_review: true
@@ -43,6 +43,11 @@ and
    `## Slice 002-01 — replace-me` heading, and the
    `_TODO: describe the first vertical slice._` placeholder. These are content
    markers frozen in the command (the live template is gone after 121-01).
+   Grounding: every committed version of both legacy seed templates
+   (`git log` on `templates/docs/specs/seed/{001-adopt-jig,002-first-spec}/spec.md.template`,
+   since `325f9ba7`) carries these markers and `skill: scaffold-init`. A
+   `001-adopt-jig/` lacking the marker is reported by name ("not recognised as
+   the jig seed; left in place"), not silently treated as nothing to retire.
    If any check fails, the directory is kept and reported as kept. Fixtures
    cover an edited stub that is still `DRAFT` with its heading intact, and a
    stub dir with an extra slice file. Both are kept.
@@ -57,7 +62,8 @@ and
      covers the real primer bullet (`- [001-adopt-jig](…) - DONE worked example
      to imitate; see [docs/specs/README.md](…)…`) and the adoption-readiness
      "Read the worked example" item, so no stale "imitate this" guidance is
-     left behind.
+     left behind. A numbered list left starting at `2.` is accepted (valid
+     Markdown, renders renumbered).
    - Any other link is replaced by its link text in backticks.
 
    The status board is regenerated. Any other link into a removed directory
