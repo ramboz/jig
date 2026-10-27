@@ -1,16 +1,9 @@
 ---
-status: DRAFT
-dependencies: []
+status: IN_PROGRESS
+dependencies: [adr-0067]
 last_verified:
-# arch_review: true  # set to true when this slice changes module
-#                    # boundaries, public contracts, or architecture-
-#                    # shaped concerns (triggers arch-review pass).
-# design_review: true  # set true when this slice's fidelity must be a HARD
-#                      # gate: extract the mockup's design values (colours,
-#                      # spacing, sizes, layout rules) into this slice's ACs,
-#                      # then wire a servo `design-eval` as the done-condition
-#                      # (attest-only at REVIEWED; ADR-0014, ADR-0022,
-#                      # ADR-0049).
+frame_review: true
+claimed_by: claude/jig-spec-scaffolding-177ac9
 ---
 
 <!-- jig self-defining vocabulary (soft, forward-only): expand each acronym on
@@ -22,61 +15,65 @@ last_verified:
      else mark them as assumptions in the spec's `## Assumptions` section —
      never assert an unverified claim as fact. -->
 
-## Slice 121-01 — tbd
+## Slice 121-01 — genesis-seed
 
-**Goal:** _TODO: one-sentence statement of what this slice delivers.
-End-to-end value in a single vertical slice (anti-horizontal-phasing
-check below)._
+**Goal:** A greenfield `scaffold-init` seeds the worked example as the genesis
+spec `000-adopt-jig` and no placeholder spec, so the project's own first spec,
+reserved with `workflow.py new`, is `001`.
 
 **DoR:**
-- ✅ _TODO: list the prerequisites that must hold before this slice
-  becomes `READY_FOR_IMPLEMENTATION` — upstream slices done, helpers
-  in place, fixtures/data available, etc._
+- ✅ [ADR-0067](../../decisions/adr-0067-genesis-spec-zero.md) records the decision.
+- ✅ `000` viability probed (spec `## Overview`, current state).
 
 **Acceptance Criteria:**
 
-1. **_TODO: first AC._** Sharp, testable, observable from outside the
-   helper (CLI output, file mutation, exit code, log line). Avoid
-   "code is clean" / "tests pass" framings — those belong in the DoD.
-2. _TODO: second AC._
-3. _TODO: third AC._
-
-### Behavioral rules (optional)
-
-For stateful or role-dependent behavior, make the implicit outcomes checkable.
-Omit this section when it adds no value, or link an existing contract instead of
-restating it. Rule IDs do not encode precedence: surface conflicting rules/ACs
-for explicit resolution. A demo does not override the owning ACs. When using an
-external reference, name its authority and revision.
-
-| Rule | Operation/control | Actor | State/precondition | Outcome | Rationale | AC |
-|------|-------------------|-------|--------------------|---------|-----------|----|
-| BR-1 | _TODO_ | _TODO_ | _TODO_ | _Allowed/blocked/hidden or concrete response_ | _Why_ | _Owning AC_ |
-
-### Verification scenario (optional)
-
-Use when a runtime journey helps verify the ACs; omit when existing tests already
-give adequate evidence. Reuse existing test/browser/service tools, not a new
-runner. CLI, service, and UI scenarios use the same evidence shape.
-
-**Preconditions:** _Environment, fixtures, access, and safe test accounts; no secrets._
-
-**Invocation:** _Reproducible command or tool steps._
-
-**Preserved behavior:** _Existing journeys or negative paths that must not regress._
-
-**Code revision / dirty-change identity:** _Revision tested; identify any uncommitted
-changes, for example with a saved diff and its digest. Evidence references are
-durable paths, not ephemeral chat claims._
-
-| Step | AC | Expected | Observed | Outcome | Evidence |
-|------|----|----------|----------|---------|----------|
-| 1 | _AC_ | _Observable result_ | _Actual observation after execution_ | _not-run_ | _Log/assertion/screenshot reference_ |
-
-Outcomes: `pass`, `fail`, `not-run`, or `environment-error`. Not-run or an
-environment-error is not a pass. If a required AC needs runtime verification,
-missing evidence leaves it unverified; do not declare completion from a build,
-a proposed script, or an unavailable environment.
+1. **Genesis seed shape.** A greenfield scaffold (any host, any
+   `layout.docs_root`) emits `<specs>/000-adopt-jig/spec.md` and
+   `<specs>/000-adopt-jig/slice-01-bootstrap.md` with `status: DONE`, headed
+   `# Spec 000: Adopt jig` and `## Slice 000-01 — bootstrap`, and **no**
+   `002-first-spec/` (nor any other `NNN-*` spec dir).
+2. **First own spec is 001.** In that freshly scaffolded project,
+   `workflow.py new <slug> --no-push` reserves `001-<slug>`.
+3. **Seed prose has no placeholder hand-off.** In a greenfield scaffold, no
+   emitted seed file, status board, primer (`CLAUDE.md` / `AGENTS.md`), or
+   `docs/adoption-readiness.md` names `002-first-spec`, `001-adopt-jig`, or
+   "spec 002". The genesis spec
+   and `adoption-readiness.md` point at `/jig:spec-workflow new <slug>` as the
+   next step and say it will be spec `001`. The genesis overview says it is
+   kept by default and may be removed once the project has its own specs
+   (naming the slice 02 command).
+4. **Status board.** The seeded `docs/specs/README.md` carries exactly one
+   row, `000-adopt-jig` / `000-01 — bootstrap` / `DONE`, and
+   `workflow.py check-board` passes on it.
+5. **Verify stays green.** `verify_install.py --mode scaffold` passes its
+   seed and docs checks on a fresh scaffold; the seed check expects the
+   genesis files, not the old three.
+6. **Skill prose follows (ADR-0067 decision 7).** Every place
+   `skills/spec-workflow/SKILL.md` points authors at the worked example
+   resolves it by state: the genesis spec (`000-adopt-jig/`, or
+   `001-adopt-jig/` in projects scaffolded earlier) if present, otherwise any
+   `DONE` slice in the project. No shipped skill file names
+   `001-adopt-jig` as the *sole* exemplar path. And
+   `skills/scaffold-init/SKILL.md`'s next-steps tell the user their first spec
+   is `001` via `/jig:spec-workflow new <slug>`.
+7. **Pointers follow the seed (ADR-0067 decision 4 invariant).** The
+   genesis pointers in the rendered `CLAUDE.md`, `AGENTS.md` and
+   `docs/adoption-readiness.md` name the genesis directory that is actually
+   there: `000-adopt-jig` when this run emits the seed or it already exists,
+   the legacy `001-adopt-jig` (detected by slug + `skill: scaffold-init`
+   frontmatter, ADR-0067 decision 3) when only that exists, and no pointer at
+   all when there is no genesis spec. Fixtures cover a `--force` re-scaffold of
+   (a) a legacy-seed project and (b) a project with no genesis spec but at
+   least one spec of its own (a spec-less specs dir is greenfield and is
+   re-seeded with `000-adopt-jig`, by design). Greenfield-ness is decided
+   before the primers render, with the same `_specs_dir_has_content`
+   predicate as the seed. In both fixtures,
+   no Markdown link in the rendered `CLAUDE.md`, `AGENTS.md` or
+   `adoption-readiness.md` targets a missing directory. Tests assert this on
+   the files themselves, because the completion verify only runs on greenfield
+   and its docs check does not scan `AGENTS.md`.
+8. **Packages in sync.** `scripts/build_host_packages.py --check` passes
+   (Codex/Copilot packages regenerated from the changed templates).
 
 **DoD:**
 - [ ] All ACs pass; full test suite green (no regressions).
@@ -94,36 +91,6 @@ a proposed script, or an unavailable environment.
 - [ ] `docs/refinement-todo.md` updated if any decisions were
       deferred during implementation.
 
-### For `kind: spike` slices
-
-When the slice's frontmatter has `kind: spike`, the body carries four
-extra labelled blocks alongside the standard Goal / DoR / AC / DoD
-scaffolding. Spike slices are timeboxed investigation, not feature
-work — they reduce an unknown before committing to a design.
-
-```markdown
-**Question:** _One sentence stating the open question. Set at DRAFT._
-
-**Time-box:** _Explicit budget — e.g., "1 day", "4 hours". Set at DRAFT._
-
-**Findings:** _Bullet evidence collected during the spike. Filled
-during IN_PROGRESS._
-
-**Outcome:** _One of: `ADR-NNNN created` / `spec NNN-NN unblocked` /
-`abandoned (reason)`. Multiple outcomes separated by `;`
-(e.g., `ADR-0007 created; spec 030-02 unblocked`). Set at DONE._
-```
-
-`spec_lint.py` validates the `kind:` enum (allowed values: `spike`,
-`feature`) and soft-warns when a `kind: spike` slice is missing any of
-the four labels. Mid-flight spikes legitimately have empty Findings /
-Outcome, so this is a warning, not a hard error.
-
-See `skills/spec-workflow/SKILL.md` (Spike slices subsection) and
-`docs/spec-workflow/spidr-primer.md` for the always-nested rule (spike
-slices live inside a real spec, never as standalone `docs/spikes/`
-artifacts) and the abandoned-outcome manual-reshape failure mode.
-
 ### Close-out (post-DONE)
 
 These items can only be ticked AFTER the final `RECONCILED → DONE`
@@ -136,41 +103,9 @@ from the count.
 - [ ] Primer hygiene per spec 025-01 rule: **if this slice closes the
       spec** (all non-deferred slices DONE), check `CLAUDE.md`,
       `AGENTS.md`, and scaffold templates when present, then **compress**
-      the spec's Active-specs entry — drop facts derivable from the
-      spec dir + status board, migrate load-bearing per-slice
-      invariants to the status board Notes column, keep at most a
-      one-liner only for cross-cutting facts. If the spec is still
-      in flight (other slices DRAFT / READY / IN_PROGRESS), leave
-      the entry. If this slice introduces a new skill, add or
-      update its row in the Skills table.
+      the spec's Active-specs entry. If the spec is still in flight, leave
+      the entry.
 
-**Anti-horizontal-phasing check:** _TODO: in one sentence, describe
-the end-to-end observable value a user gets after this slice lands.
-If the answer is "intermediate state for the next slice," the slice
-is mis-shaped — re-split._
-
-### Deviation log (after reconciliation)
-
-The original spec is preserved above. Implementation notes:
-
-_TODO: numbered sections covering deviations from the planned shape,
-reviewer findings folded back in, doc updates, plan adherence._
-
-### Reconciliation sweep
-
-Record the drift-prone surfaces checked during reconciliation. The transition
-gate only requires this subsection to exist; the reconciliation reviewer judges
-whether coverage and rationales are honest.
-
-| Artifact | Disposition | Rationale |
-|----------|-------------|-----------|
-| `README.md` | `no-op` | _TODO: why this slice did not affect the project front door, or summarize the update._ |
-| `docs/specs/README.md` | `updated` | _TODO: regenerated by `workflow.py status-board`, or explain why deferred._ |
-| `docs/product-vision.md` | `no-op` | _TODO: checked for behavior / scope drift._ |
-| `docs/architecture.md` | `no-op` | _TODO: checked for module-boundary / public-contract drift._ |
-| Primer surfaces: `CLAUDE.md` / `AGENTS.md` / scaffold templates | `no-op` | _TODO: primer hygiene checked; note compression or template updates if any._ |
-| `docs/inbox.md` | `no-op` | _TODO: checked for items resolved by this slice._ |
-| `docs/refinement-todo.md` | `no-op` | _TODO: checked for resolved items or new deferred decisions._ |
-| `docs/memory/**` | `no-op` | _TODO: note memory-sync result or why nothing was worth capturing._ |
-| `docs/decisions/README.md` / ADR index | `no-op` | _TODO: use `updated` when the slice touched ADRs; otherwise mark checked._ |
-| Additional live prose / generated templates touched by this slice | `deferred` | _TODO: name owner or trigger when real cleanup remains; otherwise replace with `no-op`._ |
+**Anti-horizontal-phasing check:** After this slice lands, a developer who
+scaffolds a new project sees one genesis row on the board and gets `001` for
+their first spec — the user-reported numbering complaint is gone end to end.
