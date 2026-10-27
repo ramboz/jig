@@ -1,5 +1,5 @@
 ---
-status: IN_PROGRESS
+status: DONE
 skill: scaffold-init
 use_cases: [UC-1, UC-2, UC-11]
 ---

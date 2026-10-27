@@ -351,8 +351,8 @@
 | [117-decision-rulings-in-context](117-decision-rulings-in-context/spec.md) | 117-01 — tbd | DRAFT |  |
 | [118-behavioral-verification-pilot](118-behavioral-verification-pilot/spec.md) | 118-01 -- author-to-review | **DONE** |  |
 | [120-generic-design-attestation](120-generic-design-attestation/spec.md) | 120-01 — attest generic static evidence | **DONE** |  |
-| [121-genesis-spec-zero](121-genesis-spec-zero/spec.md) | 121-01 — genesis-seed | **DONE** |  |
-| [121-genesis-spec-zero](121-genesis-spec-zero/spec.md) | 121-02 — retire-genesis | RECONCILED (claude/jig-spec-scaffolding…) |  |
+| [121-genesis-spec-zero](121-genesis-spec-zero/spec.md) | 121-01 — genesis-seed | **DONE** | seed = `000-adopt-jig` only (ADR-0067); primer/readiness pointers follow the genesis actually present (000 / legacy 001 / none), resolved before render |
+| [121-genesis-spec-zero](121-genesis-spec-zero/spec.md) | 121-02 — retire-genesis | **DONE** | genesis predicate everywhere = slug + `skill: scaffold-init` frontmatter (scaffold, retire-genesis, hint); refuses with no own spec; board excluded from link report |
 
 ## Deferred slices
 
