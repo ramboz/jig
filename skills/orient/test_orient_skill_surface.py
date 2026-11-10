@@ -4,7 +4,7 @@ Half of this skill ships prose, not code. These tests pin the *load-bearing
 phrases* — the ones whose absence would reproduce a reported failure or drop
 a core acceptance criterion — rather than re-reviewing wording.
 
-Three provenances live here:
+Several provenances live here:
   - Slice 101-01 (AC5–AC8): the collaboration-survey + freshness additions.
     The failure they guard against — orientation surveys only local files,
     never the collaboration layer, and so reports a project as unblocked
@@ -18,6 +18,10 @@ Three provenances live here:
     The failure they guard against — the briefing silently dropping the
     section, or growing it into a full tree / percentage / on-goal verdict
     that ADR-0064 rules out.
+  - Bug 031: the interactive path refreshes against origin (`--fetch`).
+  - Bug 041: the trigger boundary and the in-body scope check — a bare
+    "what's next?" gets a line or two plus an offer of the full orientation,
+    not the full project briefing.
 
 Run from the repo root:
     python3 skills/orient/test_orient_skill_surface.py
@@ -401,6 +405,138 @@ class OrientUseCaseProgressTests(unittest.TestCase):
         self.assertNotIn("progress --summary", body)
         self.assertNotIn("workflow.py progress", body)
         self.assertNotIn("use case", body)
+
+
+class Bug041MidSessionScopeTests(unittest.TestCase):
+    """Bug 041: a mid-session "what's next?" fired the full project briefing.
+
+    Owner decision: an explicit `/jig:orient` always runs the full skill; a
+    "what's next?" always gets the short answer (the next step in the current
+    plan) followed by an offer of the full orientation — "no" stops there,
+    "yes" runs the full skill. These pin the three places the contract was
+    mis-scoped: the description's positive surface claimed "next", its
+    exclusion covered only mid-implementation of the current slice, and the
+    body had no actionable scope check before the survey (while its Judgment
+    re-ask rule demanded a full rescan on any same-session re-ask).
+
+    Spec 101's field incident stays fixed: saying yes to the full orientation
+    runs it, collaboration survey included.
+    """
+
+    @classmethod
+    def setUpClass(cls):
+        cls.text = SKILL.read_text()
+        front = cls.text.split("---", 2)[1]
+        # Indented continuation lines only, so a key added after
+        # `description:` is not absorbed into it.
+        match = re.search(
+            r"^description:\s*>-?\s*\n((?:[ \t]+\S.*\n?)+)", front, re.M)
+        assert match, "no folded description in the frontmatter"
+        cls.description = " ".join(match.group(1).split())
+        # Same split the router uses for the positive surface
+        # (scripts/skill_routing.py `routing_surface`).
+        parts = re.split(
+            r"\bdo\s+not\s+use\b", cls.description, maxsplit=1, flags=re.I)
+        assert len(parts) == 2, "description has no 'Do not use' clause"
+        cls.positive = parts[0].lower()
+        cls.negative = ("do not use" + parts[1]).lower()
+
+    def _section(self, start_marker: str) -> str:
+        start = self.text.index(start_marker)
+        rest = self.text.find("\n## ", start + 1)
+        body = self.text[start:] if rest == -1 else self.text[start:rest]
+        return re.sub(r"\s+", " ", body).lower()
+
+    # ---- the description (what the host routes on) -------------------------
+
+    def test_positive_surface_does_not_claim_next_step_vocabulary(self):
+        """Root cause 1: 'what to pick up next' made orient the only skill
+        matching a bare 'what's next?'."""
+        self.assertNotRegex(self.positive, r"\bnext\b")
+
+    def test_bare_whats_next_gets_the_short_answer_then_an_offer(self):
+        """Root cause 2: the exclusion named only mid-implementation of the
+        current slice. Now any bare "what's next?" is answered directly, then
+        the full orientation is offered."""
+        # Tokens in order with bounded gaps, like the body tests below.
+        self.assertRegex(
+            self.negative,
+            r"do not use for a bare \"what's next\?\".{0,120}?answer it directly"
+            r".{0,120}?full project orientation.{0,80}?only if they say yes",
+        )
+
+    # ---- the body (what a loaded orient does) -------------------------------
+
+    def test_scope_check_runs_before_the_headline_command(self):
+        scope = self.text.index("## Scope check")
+        headline = self.text.index("## Start from the deterministic headline")
+        self.assertLess(
+            scope, headline,
+            "the scope check must come before any command or survey runs",
+        )
+
+    # Body assertions pin the load-bearing tokens in order (bounded gaps),
+    # not whole sentences, so harmless rewording doesn't turn them red.
+
+    def test_explicit_invocation_runs_the_full_orientation_without_asking(self):
+        body = self._section("## Scope check")
+        self.assertRegex(
+            body,
+            r"`/jig:orient`.{0,200}?full orientation.{0,40}?"
+            r"(don't|do not) ask first",
+        )
+
+    def test_whats_next_gives_the_short_answer_then_offers_the_full_one(self):
+        body = self._section("## Scope check")
+        self.assertRegex(
+            body,
+            r"what's next\?.{0,200}?short answer first.{0,300}?"
+            r"full project orientation\?",
+        )
+
+    def test_pick_up_next_is_a_whats_next_variant(self):
+        """It still ranks orient #1 lexically, so the scope check, not the
+        description, decides it — and it must land on the short answer."""
+        body = self._section("## Scope check")
+        self.assertRegex(
+            body,
+            r"what's next\?.{0,150}?what should i pick up next\?.{0,40}?"
+            r"short answer first",
+        )
+
+    def test_short_answer_has_a_fallback_when_no_plan_is_in_view(self):
+        """The last fallback must not claim a project state the agent has not
+        checked ("nothing is in progress"), or it nudges a "no" while a PR may
+        be waiting — spec 101's failure."""
+        body = self._section("## Scope check")
+        self.assertRegex(body, r"jig hint:` focus.{0,40}?no current plan in view")
+        self.assertNotIn("nothing is in progress", body)
+
+    def test_unsure_questions_default_to_the_short_answer(self):
+        body = self._section("## Scope check")
+        self.assertRegex(body, r"unsure.{0,80}?treat it as a \"what's next\?\"")
+
+    def test_no_stops_after_the_short_answer(self):
+        body = self._section("## Scope check")
+        self.assertRegex(
+            body,
+            r"\bno\b.{0,10}?stop there.{0,40}?no headline command.{0,10}?no survey")
+
+    def test_yes_runs_the_full_orientation(self):
+        """Spec 101's incident was a project-level 'what's next' that missed
+        an open PR — a yes must still run the whole orientation."""
+        body = self._section("## Scope check")
+        self.assertRegex(
+            body,
+            r"\byes\b.{0,10}?run the full orientation.{0,30}?collaboration survey")
+
+    def test_judgment_re_ask_rule_is_scoped_to_orientation(self):
+        """Root cause 3: the 101-01 AC8 re-ask rule stays, but a "what's
+        next?" is not a re-ask of orientation until the user says yes."""
+        judgment = self._section("## Judgment")
+        self.assertRegex(judgment, r"re-?ask for orientation")
+        self.assertIn("says yes to the full orientation", judgment)
+        self.assertIn("scope check", judgment)
 
 
 if __name__ == "__main__":

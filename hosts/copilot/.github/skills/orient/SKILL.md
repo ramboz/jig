@@ -2,18 +2,18 @@
 name: orient
 description: >-
   Orient a spec-driven jig/servo/shaper repository with a read-only, project-wide
-  briefing: start from the `workflow.py orient` headline, then survey open pull
-  requests and unmerged work, Proposed ADRs, DEFERRED triggers, refinement items,
-  release plans, the inbox, and the bug board; render one readable headline,
-  titled sections, one recommendation, and an
-  owning-skill handoff. Use when the user invokes `/jig:orient` or explicitly asks
-  for a whole-project session pickup, a return-after-time-away briefing, the overall
-  project status or big picture, or what to pick up next across the repository. Do
-  not use for mid-implementation questions about the current slice such as "what's
-  next?" or "what's blocking this test?"; those continue current work rather than
-  requesting a project-wide rescan. Also do not use for non-code projects; use
-  `studio:project-desk`. Never write files or lifecycle state; scheduled jobs and
-  dashboards may capture stdout.
+  briefing: start from the `workflow.py orient` headline, survey open pull requests,
+  unmerged work, Proposed ADRs, DEFERRED triggers, refinement items, release scope,
+  the inbox, and the bug board, then recommend where to start. Use when the user
+  invokes `/jig:orient` or explicitly asks for a whole-project session pickup, a
+  return-after-time-away briefing, the overall project status or big picture, or
+  what to pick up across the repository. Do not use for a bare "what's next?"
+  ("next step?", "what should I pick up next?"): answer it directly with the next
+  step from the current plan or session context, then ask whether the user wants
+  the full project orientation, and run this skill only if they say yes. Do not
+  use for work questions like "what's blocking this test?", or for non-code
+  projects (use `studio:project-desk`). Never write files or lifecycle state;
+  scheduled jobs and dashboards may capture stdout.
 ---
 
 > **`$JIG_ROOT`** — jig's runtime root (this plugin's own directory).
@@ -38,10 +38,25 @@ The substance is grounded; the **format is the point**. If the answer reads like
 paragraph with five things crammed into it, the skill has failed even if every fact is
 right.
 
-This is a **project-level rescan**, not a mid-flow nudge. A bare conversational
-*"what's next?"* while actively implementing a slice is asking to continue that slice
-— not to re-survey the whole project. Orient is for the deliberate "step back and take
-stock" moment (an explicit `/jig:orient`, a session pickup, a "where are we overall").
+---
+
+## Scope check — before running anything
+
+This is a **project-level rescan**. Look at how you got here:
+
+- **The user invoked `/jig:orient`, or explicitly asked for the whole-project
+  picture** (a session pickup, a return after time away, "where does the project
+  stand overall") → run the full orientation below. Don't ask first.
+- **The user asked "what's next?"** (or any bare next-step question: "next step?",
+  "next task?", "what should I pick up next?") → give the short answer first, in a
+  line or two: the next step in the plan or task list in progress, else the
+  SessionStart `jig hint:` focus, else say you have no current plan in view. Then
+  ask one question: do they want the full project orientation?
+  - **No** → stop there: no headline command, no survey, no briefing.
+  - **Yes** → run the full orientation below, collaboration survey included. That is
+    the project-level "what's next" spec 101 fixed.
+
+If you're unsure which case a question fits, treat it as a "what's next?".
 
 ---
 
@@ -312,13 +327,15 @@ Name the handoff in the offer; let the user green-light it.
   from the `workflow.py orient` line). If you're unsure whether a trigger is met or a board
   is stale, say so ("b08a627 just landed 036-05, so this row may be stale") rather than
   asserting.
-- **"What's next" means what is *blocked on a human*, not what the repo contains.** The
-  filesystem gives you state; the PR queue and unmerged branches give you what is waiting
-  on a decision. A survey that reads only local files will confidently report a project as
-  unblocked while an open PR sits asking the user five direct questions. Check the
-  collaboration layer **every run — including on a re-ask later in the same session**,
-  when it is tempting to answer from what you already have in context rather than looking
-  again.
+- **In a full orientation, "what's next" means what is *blocked on a human*, not what
+  the repo contains.** The filesystem gives you state; the PR queue and unmerged
+  branches give you what is waiting on a decision. A survey that reads only local files
+  will confidently report a project as unblocked while an open PR sits asking the user
+  five direct questions. Check the collaboration layer **every run — including on a
+  later re-ask for orientation in the same session**, when it is tempting to answer from
+  what you already have in context rather than looking again. A "what's next?" becomes a
+  re-ask for orientation only once the user says yes to the full orientation; until
+  then the scope check's short answer stands.
 - **Honest headline.** Surface slippage and shipped-more-than-expected with equal candor.
   Don't cheerlead; don't doom.
 - **One recommendation, not a shrug.** The user came for direction. Pick one, say why, and
@@ -334,7 +351,8 @@ Name the handoff in the offer; let the user green-light it.
 
 - Resolve `layout.docs_root` before looking for specs, decisions, bugs, the inbox, or
   releases; `docs_root="."` collapses the docs layer to the repository root.
-- Treat a bare mid-flow "what's next?" as a continuation of the current slice, not a
-  request to rescan the whole project.
+- Treat a "what's next?" as a request for the next step: answer it in a line or two,
+  then offer the full orientation, per the scope check. On its own it is not a request
+  to rescan the whole project.
 - Keep Orient zero-write. Scheduled jobs and dashboards may capture its stdout, but the
   skill itself never creates a cache, history log, or lifecycle mutation.

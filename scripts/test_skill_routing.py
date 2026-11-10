@@ -242,6 +242,54 @@ class RealCorpusTests(unittest.TestCase):
         )
 
 
+class Bug041OrientNextStepRoutingTests(unittest.TestCase):
+    """Bug 041: a bare next-step question must not lexically pull orient.
+
+    A "what's next?" should get a short answer from the agent plus an offer of
+    the full orientation, not an automatic route to orient. Orient's positive
+    surface used to be the only description in the pack claiming "next"
+    ("what to pick up next across the repository"), so every bare next-step
+    prompt ranked it #1 with every other skill at 0.00. The negative
+    route-away gate is a *rate floor* over all cases, so a handful of failing
+    orient negatives would not turn it red — this pins them per prompt.
+
+    Asserted on scores, not on rank-1 identity: when no skill matches, the
+    ranking falls back to alphabetical order, which says nothing about orient.
+    """
+
+    BARE_NEXT_STEP_PROMPTS = (
+        "ok, what's next?",
+        "what's the next step in the plan?",
+        "done with that task — what's next?",
+        "next task?",
+    )
+
+    @classmethod
+    def setUpClass(cls):
+        cls.corpus = sr.Corpus(sr.load_descriptions())
+
+    def test_orient_has_no_lexical_claim_on_bare_next_step_prompts(self):
+        for prompt in self.BARE_NEXT_STEP_PROMPTS:
+            with self.subTest(prompt=prompt):
+                scores = dict(self.corpus.rank(prompt))
+                orient = scores["orient"]
+                best_other = max(s for name, s in scores.items() if name != "orient")
+                self.assertTrue(
+                    orient == 0.0 or orient < best_other,
+                    f"orient scores {orient:.2f} (best other {best_other:.2f}) for "
+                    f"«{prompt}» — its positive surface still claims next-step "
+                    "vocabulary",
+                )
+
+    def test_bare_next_step_prompts_are_authored_orient_negatives(self):
+        """The same prompts live in evals/cases/orient.json, so the report and
+        the route-away ratchet see them too."""
+        orient = next(c for c in sr.load_cases() if c["skill_name"] == "orient")
+        negatives = {n["prompt"] for n in orient["trigger"]["negative"]}
+        for prompt in self.BARE_NEXT_STEP_PROMPTS:
+            self.assertIn(prompt, negatives)
+
+
 class GateTests(unittest.TestCase):
     """The report's exit-code gates (main) behave as documented.
 
