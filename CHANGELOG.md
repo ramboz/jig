@@ -1,5 +1,12 @@
 # Changelog
 
+## [2.17.1](https://github.com/ramboz/jig/compare/v2.17.0...v2.17.1) (2026-11-10)
+
+
+### Bug Fixes
+
+* **orient:** answer a bare "what's next?" briefly, then offer the full briefing (bug 041) ([#248](https://github.com/ramboz/jig/issues/248)) ([bf518cd](https://github.com/ramboz/jig/commit/bf518cd1c21840d33c8ef497c87b529b984d5f15))
+
 ## [2.17.0](https://github.com/ramboz/jig/compare/v2.16.2...v2.17.0) (2026-10-27)
 
 
