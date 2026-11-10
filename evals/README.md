@@ -72,6 +72,11 @@ One file per skill: `evals/cases/<skill-name>.json`.
 - `top_k` defaults to 3; tighten to 1 for a skill's signature ask.
 - `owner` on a negative turns it into a real pairwise test: the owner must
   outrank this skill, not merely "this skill isn't #1".
+- Omit `owner` only when no skill should take the prompt (e.g. a bare
+  "what's next?", which the agent answers itself before offering the full
+  orientation). That check is weak: on an all-zero tie it passes or fails on
+  alphabetical order alone. Pair it with a hard, score-based test, as bug 041
+  does in `scripts/test_skill_routing.py`.
 
 ## Known limitations (why this is a canary, not ground truth)
 

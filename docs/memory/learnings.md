@@ -1491,3 +1491,29 @@ board-integrity tests. The code may be fine. Spec 121 hit this twice. Either
 batch transitions and verdict recording until the suite finishes, or
 regenerate the board and re-run only `test_board_integrity` afterwards. The
 second option is valid only when the code is unchanged since the suite run.
+
+## Bug 041: a route-away clause can't beat being the only positive match
+
+`jig:orient` said "do not use for … 'what's next?'" from the day it shipped,
+and still fired on a mid-session "what's next?". The exclusion lost for three
+reasons. Orient's positive surface ("what to pick up next across the
+repository") was the only description in the pack claiming "next", so a bare
+next-step prompt matched orient and nothing else (lexically 0.13 vs 0.00 for
+every other skill). The exclusion named a narrower case ("mid-implementation of
+the current slice") than the one users hit (between steps of a plan). And once
+loaded, the body's only early scope note was just as narrow and never said to
+stop, while its Judgment rule told the model to redo the full survey on any
+same-session re-ask. Fixes that generalise: keep shared conversational
+vocabulary out of a heavyweight skill's positive surface; when a short
+question has a cheap reading and an expensive one ("the next step in this
+plan" vs. "the whole project"), give the cheap answer and offer the expensive
+one, rather than guessing which was meant. A first fix that guessed from
+context passed review but still had a misread case, and asking up front added
+a round-trip before any answer; the owner settled on answer-then-offer. Put
+that check at the top of the body as a backstop, so a misfire costs a line and
+a question rather than a briefing, and never let it delay an explicit
+invocation. The negative-case eval gate is a rate floor, so per-prompt
+regressions need a hard, score-based test
+(`Bug041OrientNextStepRoutingTests`). Watch the lexical proxy for incidental
+hits: "release plans" and "step back" each re-matched "the next step in the
+plan".

@@ -10,7 +10,11 @@
       { "prompt": "I just wrote the failing test — what's next?", "owner": "tdd-loop" },
       { "prompt": "I'm stuck — what's blocking this test from going green?", "owner": "tdd-loop" },
       { "prompt": "What's left to finish on the slice I'm implementing right now?", "owner": "spec-workflow" },
-      { "prompt": "Fix this bug — diagnose the root cause before writing the fix", "owner": "bug-fix" }
+      { "prompt": "Fix this bug — diagnose the root cause before writing the fix", "owner": "bug-fix" },
+      { "prompt": "ok, what's next?" },
+      { "prompt": "what's the next step in the plan?" },
+      { "prompt": "done with that task — what's next?" },
+      { "prompt": "next task?" }
     ]
   }
 }
