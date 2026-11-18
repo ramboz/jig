@@ -1135,6 +1135,16 @@ boundaries, public contracts, and design coherence?
   (leaner-that-still-passes) — never stripping behavior the ACs require.
 - What architectural decisions does the change get right?
 
+## Decisions only a person can make
+
+Some findings are not the implementer's to fix: a path that duplicates
+existing work, effort past what the plan states, a slice tied to no goal
+line, or a hard-to-reverse choice. Report each one with `VERDICT: fail`
+and an entry of the form
+`- [blocker][spec] <file:line> — ESCALATE: <decision> (options: A, B)`.
+The workflow then stops this slice and parks the decision for a person;
+nobody tries to fix it.
+
 {_PR_REVIEW_OUTPUT_FORMAT}
 """
 
@@ -2006,6 +2016,15 @@ def record_review(args) -> int:
     out_path.parent.mkdir(parents=True, exist_ok=True)
     atomic_write_text(out_path, content)
     sys.stdout.write(f"recorded {args.pass_name} verdict → {out_path}\n")
+    if args.pass_name == "arch" and args.verdict != "pass":
+        # Spec 122-01: an escalated arch verdict is a person's decision, not
+        # a finding to fix — say so at the moment it is recorded.
+        decisions = _evidence.escalations(body)
+        if decisions:
+            sys.stdout.write(
+                f"STOP — slice {slice_label}: "
+                f"{_evidence.escalation_guidance(decisions, out_path)}\n"
+            )
     return 0
 
 

@@ -182,6 +182,17 @@ when the slice changes module boundaries, public contracts, or
 architecture-shaped concerns. The slice template ships the field
 commented out as a discoverability nudge.
 
+**Escalation (spec 122-01).** A decision only a person can make (a
+duplicated path, effort past plan, a slice tied to no goal line, a
+hard-to-reverse choice) comes back as `VERDICT: fail` with a `[blocker]`
+entry whose description starts with `ESCALATE:`; the arch prompt states the
+format. Record it as returned: `record-review` prints a `STOP` notice, and
+`check-reviews` / `transition` refuse with "a person must decide" rather than
+"re-run the review". Do not fix it or re-run the pass — follow
+`spec-workflow` SKILL.md's **Escalated arch finding** case (an inbox entry per
+decision, `blocked_by:` on the slice). `review_evidence.escalations()` is the
+one parser both messages use.
+
 ### Frame-critique (adversarial pass — slice 064-03 / ADR-0020, on-demand)
 
 Unlike every other pass, frame-critique runs **PRE-implementation** — it
@@ -363,7 +374,9 @@ bypasses the gate with `JIG_REVIEW_EVIDENCE_GATE=0`. **Recovering from a
 failed review:** address the findings, re-run the pass, `record-review`
 again (overwrites the earlier file for that `(slice, pass)` in place — git
 history is the audit trail), then re-run the transition; with every
-required pass now `pass`, the gate clears.
+required pass now `pass`, the gate clears. The exception is an arch verdict
+with `ESCALATE:` entries: it waits for a person (spec-workflow SKILL.md,
+**Escalated arch finding**), and the gate's diagnostic says so.
 
 ### What gets put in the prompt automatically
 

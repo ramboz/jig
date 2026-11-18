@@ -4228,5 +4228,130 @@ class Bug017RecordReviewStdinTests(unittest.TestCase):
         self.assertIn("PIPED-BODY-SENTINEL", self._evidence_file().read_text())
 
 
+
+# ---------------------------------------------------------------------------
+# Spec 122-01 — an arch `ESCALATE:` entry stops the slice for a person.
+# ---------------------------------------------------------------------------
+
+
+ARCH_ESCALATED_BODY = """\
+VERDICT: fail
+
+REASONING:
+The slice re-implements an existing client.
+
+SPECIFIC ISSUES:
+- [blocker][spec] src/billing/client.ts:12 — ESCALATE: keep the new client or
+  reuse the existing payments client (options: A keep, B reuse)
+- [blocker][impl] src/billing/client.ts:40 — retry loop never backs off
+
+RECONCILIATION NOTES:
+none
+"""
+
+
+class ArchEscalationRecordNoticeTests(unittest.TestCase):
+    """Slice 122-01 AC3: recording an escalated arch verdict prints a STOP
+    notice after writing the record; every other recording is unchanged."""
+
+    def setUp(self):
+        self.tmp = Path(tempfile.mkdtemp(prefix="jig-rec-esc-"))
+        self.spec = _make_spec_with_slice(self.tmp / "122-x", "02", "foo",
+                                          arch_review=True)
+
+    def tearDown(self):
+        import shutil
+        shutil.rmtree(self.tmp, ignore_errors=True)
+
+    def _record(self, pass_name, verdict, body):
+        return subprocess.run(
+            [sys.executable, str(REVIEW), "record-review", str(self.spec),
+             "0XX-02", "--pass", pass_name, "--verdict", verdict,
+             "--reviewer", "jig:reviewer", "--prompt-source", "review.py x",
+             "--summary-file", "-"],
+            input=body, capture_output=True, text=True,
+            env={**os.environ, "CLAUDE_PLUGIN_ROOT": str(REPO_ROOT)},
+        )
+
+    def test_escalated_arch_fail_prints_stop_notice(self):
+        r = self._record("arch", "fail", ARCH_ESCALATED_BODY)
+        self.assertEqual(r.returncode, 0, f"stderr: {r.stderr}")
+        f = self.spec.parent / "reviews" / "slice-02-arch.md"
+        self.assertTrue(f.is_file())
+        self.assertIn("ESCALATE: keep the new client", f.read_text())
+        out = r.stdout
+        self.assertIn("recorded arch verdict", out)
+        self.assertIn("STOP", out)
+        self.assertIn("reuse the existing payments client", out)
+        self.assertIn("memory.py add-inbox", out)
+        self.assertIn("blocked_by:", out)
+        self.assertNotIn("retry loop", out)
+
+    def test_other_recordings_print_only_the_recorded_line(self):
+        cases = (
+            ("arch", "fail", "SPECIFIC ISSUES:\n- [blocker] x.py:1 — bug\n"),
+            ("arch", "pass", ARCH_ESCALATED_BODY),
+            ("craft", "fail", ARCH_ESCALATED_BODY),
+        )
+        for pass_name, verdict, body in cases:
+            with self.subTest(pass_name=pass_name, verdict=verdict):
+                r = self._record(pass_name, verdict, body)
+                self.assertEqual(r.returncode, 0, f"stderr: {r.stderr}")
+                lines = r.stdout.splitlines()
+                self.assertEqual(len(lines), 1, r.stdout)
+                self.assertTrue(lines[0].startswith(
+                    f"recorded {pass_name} verdict"), r.stdout)
+
+
+class ArchEscalationPromptTests(unittest.TestCase):
+    """Slice 122-01 AC4: the arch prompt states when and how to escalate."""
+
+    def setUp(self):
+        self.tmpdir = tempfile.mkdtemp(prefix="jig-rev-esc-")
+        self.spec = Path(self.tmpdir) / "spec.md"
+        write_synthetic_spec(self.spec, "031-02 alpha")
+
+    def tearDown(self):
+        import shutil
+        shutil.rmtree(self.tmpdir, ignore_errors=True)
+
+    def test_arch_prompt_states_escalate_format(self):
+        r = run_review("arch-review", str(self.spec), "031-02", "x.py")
+        self.assertEqual(r.returncode, 0, f"stderr: {r.stderr}")
+        prompt = normalize_ws(r.stdout)
+        self.assertIn("ESCALATE: <decision> (options: A, B)", prompt)
+        self.assertIn("VERDICT: fail", prompt)
+        for trigger in ("duplicates existing work", "effort past",
+                        "no goal line", "hard-to-reverse"):
+            self.assertIn(trigger, prompt, trigger)
+
+    def test_craft_prompt_does_not_offer_escalation(self):
+        r = run_review("pr-review", str(self.spec), "031-02", "x.py")
+        self.assertEqual(r.returncode, 0, f"stderr: {r.stderr}")
+        self.assertNotIn("ESCALATE:", r.stdout)
+
+
+class EscalationRecoveryDocsTests(unittest.TestCase):
+    """Slice 122-01 AC5: the recovery docs cover the escalated case."""
+
+    SPEC_WORKFLOW = REPO_ROOT / "skills" / "spec-workflow" / "SKILL.md"
+
+    def test_spec_workflow_recovery_covers_escalation(self):
+        text = normalize_ws(self.SPEC_WORKFLOW.read_text())
+        start = text.find("**Escalated arch finding")
+        self.assertGreater(start, -1,
+                           "spec-workflow SKILL.md needs an "
+                           "'Escalated arch finding' recovery case")
+        case = text[start:start + 2000]
+        for needle in ("ESCALATE:", "memory.py add-inbox", "blocked_by:",
+                       "**Blocked:**", "re-run"):
+            self.assertIn(needle, case, needle)
+
+    def test_independent_review_points_at_the_escalated_case(self):
+        text = normalize_ws(SKILL_MD.read_text())
+        self.assertIn("ESCALATE:", text)
+        self.assertIn("Escalated arch finding", text)
+
+
 if __name__ == "__main__":
     unittest.main()

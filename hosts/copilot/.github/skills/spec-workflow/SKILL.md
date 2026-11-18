@@ -643,6 +643,33 @@ the new verdict (it **overwrites in place** the earlier file for that
 clears. A non-`pass` artifact never overwritten by a later `pass` keeps
 blocking — the "superseded without a later pass" case (ADR-0014 §4).
 
+**Escalated arch finding — stop for a person (spec 122-01).** Some arch
+findings are decisions only a person can make: a path that duplicates
+existing work, effort past what the plan states, a slice tied to no goal
+line, a hard-to-reverse choice. The arch reviewer reports each as
+`VERDICT: fail` with a `[blocker]` entry whose description starts with
+`ESCALATE:` (`- [blocker][spec] <file:line> — ESCALATE: <decision> (options:
+A, B)`). Do **not** run the recovery above for it — do not fix it and do not
+re-run the pass:
+
+1. `record-review` the arch verdict exactly as the reviewer returned it. It
+   prints a `STOP` notice naming each escalated decision.
+2. Park each decision in the project inbox, with its options and the record's
+   path: `memory.py add-inbox "<spec> <slice> arch escalation: <decision>
+   (options: …) — see <docs>/specs/NNN-<slug>/reviews/slice-NN-arch.md"
+   <project-dir>`.
+3. Mark the slice blocked: set `blocked_by: arch escalation (see inbox)` in its
+   frontmatter and add a `**Blocked:**` line naming the decision
+   ([ADR-0057](../../docs/decisions/adr-0057-first-class-blockers-are-annotations.md)).
+4. Stop work on that slice. Other slices can continue; in an unattended run,
+   end the run for this slice here.
+
+Any non-escalated `[blocker]` entries in the same verdict wait with it. Once a
+person has decided and recorded the decision (an ADR, a lightweight decision,
+or a spec edit), clear `blocked_by:`, apply the decision, and re-run the arch
+pass. `check-reviews` and `transition … REVIEWED` keep refusing an escalated
+arch record with the same "a person must decide" message until then.
+
 **When a review retracts a *claim*, sweep the corpus before re-recording.**
 The recovery above is written for a code-shaped finding, which is local to one
 file. A finding about **content** is not: a retracted assertion is usually
