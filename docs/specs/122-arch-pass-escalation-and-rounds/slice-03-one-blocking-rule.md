@@ -1,8 +1,9 @@
 ---
-status: DRAFT
+status: IN_PROGRESS
 dependencies: []
 last_verified: 2026-11-17
 kind: feature
+claimed_by: claude/arch-pass-escalate-rounds
 ---
 
 <!-- jig self-defining vocabulary (soft, forward-only): expand each acronym on

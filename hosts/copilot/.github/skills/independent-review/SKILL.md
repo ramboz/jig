@@ -143,8 +143,10 @@ Copilot's skill router resolves user > project > `jig:pr-review` precedence
 via the skill description hints. The pass returns the canonical four output
 buckets (scope / blockers / nits / strengths) wrapped in the same verdict
 envelope as the compliance pass. SPECIFIC ISSUES entries are tagged
-`[blocker]` / `[nit]` / `[strength]`; only `[blocker]` entries block the
-REVIEWED transition.
+`[blocker]` / `[nit]` / `[strength]`. The reviewer returns `pass` when no
+`[blocker]` entry remains (nits go to the deviation log) and
+`needs-changes` / `fail` otherwise; the gate clears only on `pass`
+(ADR-0014 §3).
 
 ### Arch-review (architecture pass — slice 031-02, on-demand)
 
@@ -180,8 +182,9 @@ When `$NEED_ARCH` is `true`, feed `[jig:phase=arch] [jig:spec=NNN]
 dispatch as `pr-review` to the most-specific `arch-review` SKILL.md
 reachable. The pass returns the canonical four arch output buckets (summary /
 strengths / concerns / open questions). Tag and block semantics match the
-craft pass: `[blocker]` entries block the REVIEWED transition; `[nit]`
-entries and `needs-changes` become reconciliation-log items.
+craft pass: a review whose entries are only `[nit]` / `[strength]` returns
+`pass` (nits go to the deviation log); any `[blocker]` entry makes it
+`needs-changes` or `fail`, which blocks the REVIEWED transition.
 
 Slice authors set `arch_review: true` in the slice file's frontmatter
 when the slice changes module boundaries, public contracts, or

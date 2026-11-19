@@ -578,20 +578,20 @@ tags before the `review.py` body: `[jig:phase=<phase>] [jig:spec=NNN]
 when `code_health_review: true`) must pass before
 `transition <slice> REVIEWED`:
 
-- Any `fail` verdict from any pass blocks the transition.
-- `needs-changes` from the compliance pass blocks (the implementer
-  addresses findings and re-runs).
-- `needs-changes` from the craft pass does NOT block — the
-  `[nit]`-tagged entries become reconciliation-log items (the
-  implementer captures them in the deviation log during reconciliation).
-  Only `[blocker]`-tagged entries from the craft pass block the
-  transition.
-- The arch pass follows the same rule as the craft pass:
-  `[blocker]`-tagged entries block; `[nit]`-tagged entries and
-  `needs-changes` become reconciliation-log items.
-- The code-health pass follows the same rule: `[blocker]`-tagged entries
-  block the `REVIEWED` transition; `[nit]`-tagged entries become
-  reconciliation-log items.
+One rule, the one the gate enforces
+([ADR-0014](../../docs/decisions/adr-0014-review-evidence-model.md) §3): a
+pass clears only when its recorded verdict is `pass`.
+
+- Any `fail` or `needs-changes` verdict, from any pass, blocks the
+  transition. The implementer addresses the findings and the pass is re-run.
+- For the craft, arch and code-health passes the reviewer maps tags to the
+  verdict: `pass` when no `[blocker]` entry remains — the `[nit]` and
+  `[strength]` entries go in RECONCILIATION NOTES and on into the deviation
+  log; `needs-changes` or `fail` when at least one entry is `[blocker]`. The
+  prompt states this rule.
+- The orchestrator records the verdict the reviewer returned. It never
+  re-records a `needs-changes` as `pass` itself; a `needs-changes` with no
+  `[blocker]` entry is a reviewer slip, so re-run the pass.
 
 **Measurement tag (non-gating).** The craft/arch/code-health passes also
 self-classify each SPECIFIC ISSUES entry `[spec]` (an acceptance-criteria /

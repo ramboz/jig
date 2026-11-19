@@ -2474,8 +2474,8 @@ class SpecWorkflowSkillThreePassTests(unittest.TestCase):
       - mention BOTH the compliance and craft passes under
         "After implementation"
       - name the order (compliance → craft)
-      - name the block rule (fail blocks; needs-changes blocks for
-        compliance, becomes a reconciliation-log entry for craft)
+      - name the block rule (only `pass` clears; spec 122-03 aligned the
+        prose with ADR-0014 §3)
     """
 
     SKILL_MD = REPO_ROOT / "skills" / "spec-workflow" / "SKILL.md"
@@ -2525,9 +2525,8 @@ class SpecWorkflowSkillThreePassTests(unittest.TestCase):
 
     def test_after_implementation_names_block_rule(self):
         section = self._after_implementation_section()
-        # The block rule: any `fail` blocks; `needs-changes` is split —
-        # blocks for compliance, becomes a reconciliation-log entry for
-        # craft. Look for "fail" + "block" in the prose.
+        # The block rule: any `fail` / `needs-changes` blocks (ADR-0014 §3).
+        # Look for "fail" + "block" in the prose.
         self.assertRegex(
             section,
             r"(?is)fail.*block|block.*fail",
@@ -4507,6 +4506,78 @@ class ReviewerAgentRoundExceptionTests(unittest.TestCase):
                       text)
         self.assertIn("evidence on disk", text)
 
+
+
+# ---------------------------------------------------------------------------
+# Spec 122-03 — one blocking rule (ADR-0014 §3) in the prompt and the docs.
+# ---------------------------------------------------------------------------
+
+
+# Live prose that states the REVIEWED block rule. Closed records (spec
+# slices, accepted ADRs) keep their historical wording (ADR-0010) and are
+# deliberately not scanned; the generated `hosts/` copies mirror `skills/`.
+BLOCK_RULE_LIVE_DOCS = (
+    *sorted((REPO_ROOT / "skills").glob("*/SKILL.md")),
+    REPO_ROOT / "docs" / "workflow.md",
+    *sorted((REPO_ROOT / "agents").glob("*.md")),
+)
+
+
+def _prose_units(text: str):
+    """Split markdown into paragraphs, then each paragraph into its list
+    items, so one bullet is judged on its own."""
+    for para in re.split(r"\n\s*\n", text):
+        yield from re.split(r"\n(?=\s*(?:[-*]|\d+\.)\s)", para)
+
+
+class OneBlockingRuleTests(unittest.TestCase):
+    """Slice 122-03: the shared craft/arch/code-health output format states
+    ADR-0014 §3's authoring rule, and no live doc says a `needs-changes`
+    does not block."""
+
+    RULE = "`pass` when no `[blocker]` entry remains"
+
+    def setUp(self):
+        self.tmpdir = tempfile.mkdtemp(prefix="jig-rev-rule-")
+        self.spec = Path(self.tmpdir) / "spec.md"
+        write_synthetic_spec(self.spec, "031-02 alpha")
+
+    def tearDown(self):
+        import shutil
+        shutil.rmtree(self.tmpdir, ignore_errors=True)
+
+    def test_craft_arch_and_code_health_prompts_state_the_rule(self):
+        summary = Path(self.tmpdir) / "health.txt"
+        summary.write_text("clean\n")
+        for args in (("pr-review",), ("arch-review",),
+                     ("code-health", "--summary-file", str(summary))):
+            with self.subTest(command=args[0]):
+                r = run_review(args[0], str(self.spec), "031-02", "x.py",
+                               *args[1:])
+                self.assertEqual(r.returncode, 0, f"stderr: {r.stderr}")
+                flat = normalize_ws(r.stdout)
+                self.assertIn(self.RULE, flat)
+                self.assertIn("`needs-changes` or `fail` when at least one "
+                              "entry is `[blocker]`", flat)
+
+    def test_no_live_doc_says_needs_changes_does_not_block(self):
+        bad = re.compile(r"(?i)does\s+not\s+block|reconciliation-log\s+item")
+        offenders = []
+        for path in BLOCK_RULE_LIVE_DOCS:
+            for unit in _prose_units(path.read_text()):
+                if "needs-changes" in unit and bad.search(unit):
+                    offenders.append(f"{path.relative_to(REPO_ROOT)}: "
+                                     f"{normalize_ws(unit)[:120]}")
+        self.assertEqual(offenders, [],
+                         "a live doc pairs `needs-changes` with 'does not "
+                         "block' / 'reconciliation-log items' — ADR-0014 §3 "
+                         "says only `pass` clears")
+
+    def test_spec_workflow_states_the_single_rule(self):
+        text = normalize_ws(
+            (REPO_ROOT / "skills" / "spec-workflow" / "SKILL.md").read_text())
+        self.assertIn("records the verdict the reviewer returned", text)
+        self.assertIn("ADR-0014", text)
 
 if __name__ == "__main__":
     unittest.main()

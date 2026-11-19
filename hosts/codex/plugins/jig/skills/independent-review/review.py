@@ -908,6 +908,11 @@ RECONCILIATION NOTES:
  block the REVIEWED transition>
 ```
 
+Verdict rule (ADR-0014 §3): `pass` when no `[blocker]` entry remains —
+nits and strengths go in RECONCILIATION NOTES and do not block;
+`needs-changes` or `fail` when at least one entry is `[blocker]`. The
+gate clears only on `pass`.
+
 Be terse but specific. Cite file:line when flagging issues."""
 
 

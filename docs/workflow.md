@@ -381,9 +381,10 @@ and REVIEWED — two always-on, two gated on slice frontmatter flags.
    makes the pass work on a subagent that has no `Skill` tool: a prose
    skill-router instruction would be inert there.) Output: scope / blockers /
    nits / strengths, wrapped in the same verdict envelope; SPECIFIC ISSUES entries
-   tagged `[blocker]` / `[nit]` / `[strength]`. Only `[blocker]`-tagged
-   entries block; `[nit]` and `needs-changes` become reconciliation-log
-   items.
+   tagged `[blocker]` / `[nit]` / `[strength]`. The reviewer returns `pass`
+   when no `[blocker]` entry remains (nits go to the deviation log) and
+   `needs-changes` / `fail` otherwise; only `pass` clears the gate
+   (ADR-0014 §3).
 3. **Arch pass — `arch-review`** (on-demand). Runs only when the
    slice's frontmatter declares `arch_review: true`. Same file-read
    dispatch (`~/.claude/skills/arch-review/`, else jig's baseline).
