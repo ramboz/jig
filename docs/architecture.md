@@ -389,6 +389,14 @@ diagnostics only. The orchestrator parks the decision with `memory.py
 add-inbox` and marks the slice `blocked_by:` (ADR-0057); jig adds no lifecycle
 state for it.
 
+A re-run arch pass reads its own previous record (spec 122-02):
+`review.py`'s arch builder looks for `reviews/slice-NN-arch.md` through
+`review_evidence.evidence_path` and, when it exists, swaps the "first time"
+preamble for one that says earlier rounds exist only as files and adds a
+"Previous round" section read after the reviewer's own review. jig does not
+parse the record's `round: N · open · searched` line; the reviewer does. Every
+other pass's prompt is unchanged.
+
 ### Autonomy governance plane (spec 106 / ADR-0051)
 
 `scaffold-init` scaffolds the *scaffoldable half* of an out-of-band governance

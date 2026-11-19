@@ -388,7 +388,9 @@ and REVIEWED — two always-on, two gated on slice frontmatter flags.
    slice's frontmatter declares `arch_review: true`. Same file-read
    dispatch (`~/.claude/skills/arch-review/`, else jig's baseline).
    Output: summary / strengths / concerns / open questions. Same block
-   rule as the craft pass.
+   rule as the craft pass. On a re-run, the prompt names the slice's previous
+   arch record; the reviewer reads it after its own review, gives each earlier
+   finding a status, and continues the `round: N` line (spec 122-02).
 4. **Code-health pass — `jig:code-health`** (on-demand, **gated** by
    `code_health_review: true`). The orchestrator runs `health.py` and feeds
    its **tight summary** into `review.py code-health … --summary-file`; the
@@ -407,6 +409,8 @@ The reviewer's isolation is prompt- and tool-scoped — a self-contained
 prompt plus read-only tools — not a hard sandbox (parent context is
 technically reachable; see `skills/independent-review/SKILL.md`
 § Context isolation pattern). It works reliably when the prompt is sharp.
+The one file a reviewer reads from an earlier round is the arch pass's own
+previous record — evidence on disk, never the implementer's conversation.
 
 ### Recording verdict evidence (the gate's input)
 
