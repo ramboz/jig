@@ -4507,7 +4507,6 @@ class ReviewerAgentRoundExceptionTests(unittest.TestCase):
         self.assertIn("evidence on disk", text)
 
 
-
 # ---------------------------------------------------------------------------
 # Spec 122-03 — one blocking rule (ADR-0014 §3) in the prompt and the docs.
 # ---------------------------------------------------------------------------
@@ -4519,8 +4518,12 @@ class ReviewerAgentRoundExceptionTests(unittest.TestCase):
 BLOCK_RULE_LIVE_DOCS = (
     *sorted((REPO_ROOT / "skills").glob("*/SKILL.md")),
     REPO_ROOT / "docs" / "workflow.md",
+    REPO_ROOT / "templates" / "docs" / "workflow.md.template",
     *sorted((REPO_ROOT / "agents").glob("*.md")),
 )
+_NOT_BLOCKING_RE = re.compile(
+    r"(?i)(?:does|do|is)(?:\s+not|n't)\s+block|non-blocking"
+    r"|reconciliation-log\s+item")
 
 
 def _prose_units(text: str):
@@ -4528,6 +4531,13 @@ def _prose_units(text: str):
     items, so one bullet is judged on its own."""
     for para in re.split(r"\n\s*\n", text):
         yield from re.split(r"\n(?=\s*(?:[-*]|\d+\.)\s)", para)
+
+
+def _needs_changes_offenders(text: str) -> list:
+    """Prose units that pair `needs-changes` with "does not block" (or a
+    variant) or with "reconciliation-log items"."""
+    return [normalize_ws(unit)[:120] for unit in _prose_units(text)
+            if "needs-changes" in unit and _NOT_BLOCKING_RE.search(unit)]
 
 
 class OneBlockingRuleTests(unittest.TestCase):
@@ -4561,23 +4571,39 @@ class OneBlockingRuleTests(unittest.TestCase):
                               "entry is `[blocker]`", flat)
 
     def test_no_live_doc_says_needs_changes_does_not_block(self):
-        bad = re.compile(r"(?i)does\s+not\s+block|reconciliation-log\s+item")
-        offenders = []
-        for path in BLOCK_RULE_LIVE_DOCS:
-            for unit in _prose_units(path.read_text()):
-                if "needs-changes" in unit and bad.search(unit):
-                    offenders.append(f"{path.relative_to(REPO_ROOT)}: "
-                                     f"{normalize_ws(unit)[:120]}")
+        offenders = [f"{path.relative_to(REPO_ROOT)}: {unit}"
+                     for path in BLOCK_RULE_LIVE_DOCS
+                     for unit in _needs_changes_offenders(path.read_text())]
         self.assertEqual(offenders, [],
                          "a live doc pairs `needs-changes` with 'does not "
                          "block' / 'reconciliation-log items' — ADR-0014 §3 "
                          "says only `pass` clears")
 
+    def test_the_check_flags_the_old_wording(self):
+        # The closed ADR-0014 Context section still carries the pre-122
+        # wording; it is a record, so it is not scanned (ADR-0010). The check
+        # must flag it — otherwise the live-doc scan proves nothing.
+        adr = (REPO_ROOT / "docs" / "decisions" /
+               "adr-0014-review-evidence-model.md").read_text()
+        self.assertTrue(_needs_changes_offenders(adr))
+        for variant in ("doesn't block", "do not block", "is non-blocking"):
+            with self.subTest(variant=variant):
+                self.assertTrue(_needs_changes_offenders(
+                    f"- a craft `needs-changes` {variant}"))
+
     def test_spec_workflow_states_the_single_rule(self):
         text = normalize_ws(
             (REPO_ROOT / "skills" / "spec-workflow" / "SKILL.md").read_text())
-        self.assertIn("records the verdict the reviewer returned", text)
-        self.assertIn("ADR-0014", text)
+        for clause in (
+            "a pass clears only when its recorded verdict is `pass`",
+            "Any `fail` or `needs-changes` verdict, from any pass, blocks",
+            "`pass` when no `[blocker]` entry remains",
+            "on into the deviation log",
+            "records the verdict the reviewer returned",
+        ):
+            with self.subTest(clause=clause):
+                self.assertIn(clause, text)
+
 
 if __name__ == "__main__":
     unittest.main()

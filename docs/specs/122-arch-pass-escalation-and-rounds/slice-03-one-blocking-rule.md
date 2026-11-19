@@ -1,5 +1,5 @@
 ---
-status: IN_PROGRESS
+status: REVIEWED
 dependencies: []
 last_verified: 2026-11-17
 kind: feature
@@ -65,18 +65,18 @@ authoring rule); `verdict_clears` does not change.
 
 **DoD:**
 - [ ] All ACs pass; full test suite green (no regressions).
-- [ ] Implementer test coverage exercises each AC with at least one
+- [x] Implementer test coverage exercises each AC with at least one
       fixture. Edge cases listed in the slice are covered explicitly.
-- [ ] Each new test has been shown to fail when its feature is removed —
+- [x] Each new test has been shown to fail when its feature is removed —
       the test is capable of failing, not vacuously green (mutate the
       feature, watch the test go red, restore).
-- [ ] Reviewed by `reviewer` subagent. Reviewer prompt built by
+- [x] Reviewed by `reviewer` subagent. Reviewer prompt built by
       `review.py`.
-- [ ] Implementation review passed.
-- [ ] Deviation log produced under this slice heading.
-- [ ] Reconciliation sweep produced under this slice heading.
+- [x] Implementation review passed.
+- [x] Deviation log produced under this slice heading.
+- [x] Reconciliation sweep produced under this slice heading.
 - [ ] Reconciliation review passed.
-- [ ] `docs/refinement-todo.md` updated if any decisions were
+- [x] `docs/refinement-todo.md` updated if any decisions were
       deferred during implementation.
 
 ### Close-out (post-DONE)
@@ -87,3 +87,70 @@ authoring rule); `verdict_clears` does not change.
 **Anti-horizontal-phasing check:** after this slice, a reviewer with only nits
 returns `pass`, the orchestrator records it, and the transition clears — the
 docs and the gate tell the same story.
+
+### Deviation log (after reconciliation)
+
+The original slice is preserved above. Implementation notes:
+
+1. **Rule chosen by the owner (2026-11-17): only `pass` clears.** This keeps
+   `verdict_clears` and the gate exactly as they were (AC4: `review_evidence.py`
+   is not touched by this slice) and restores conformance with ADR-0014 §3,
+   whose authoring rule already said a nits-only craft/arch review is recorded
+   as `pass`. No ADR change.
+2. **One line beyond AC2.** spec-workflow's rule adds that a `needs-changes`
+   with no `[blocker]` entry is a reviewer slip, so the pass is re-run. It
+   follows from AC2 (the orchestrator never re-records a verdict) and gives the
+   orchestrator a next step.
+3. **Pinning test scope.** `OneBlockingRuleTests` scans `skills/*/SKILL.md`,
+   `docs/workflow.md`, `templates/docs/workflow.md.template` and `agents/*.md`.
+   It does not scan `skills/*/references/*.md`, `README.md`, `CLAUDE.md`, or the
+   generated `hosts/` mirrors (rebuilt from `skills/`, drift-guarded by CI).
+   Closed records (spec 031 slices, ADR-0014's Context section) are excluded on
+   purpose (ADR-0010); `test_the_check_flags_the_old_wording` shows the check
+   would flag ADR-0014's old wording, so the exclusion is what keeps it out.
+4. **Changes after the compliance and craft verdicts** (both `pass`; their
+   recorded bodies predate these and no further pass saw them): the
+   always-true `assertIn("ADR-0014", …)` was replaced by asserting the AC2
+   clauses themselves; the forbidden-phrase check now also catches "doesn't
+   block", "do not block" and "non-blocking"; the workflow template joined the
+   scan; `test_the_check_flags_the_old_wording` was added; PEP 8 blank lines
+   fixed.
+5. **An older test's docstring restated the old rule.**
+   `SpecWorkflowSkillThreePassTests` described `needs-changes` from craft as a
+   reconciliation-log entry; its docstring and comment now cite ADR-0014 §3. No
+   assertion changed.
+6. **Red before the change.** The three tests written first all failed
+   before the change (each asserts text the slice adds, or the absence of text
+   it removes). `test_the_check_flags_the_old_wording`, added after review,
+   tests the checker rather than the docs, so it passes with or without the
+   doc edits; it fails if the checker stops recognising the old wording.
+7. **Spec close.** This slice closes spec 122. Status-board Notes carry the
+   per-slice invariants. A one-line `CLAUDE.md` entry was tried and removed:
+   it pushed the primer past `test_lean_primer`'s byte budget (spec 055/057),
+   and the board Notes already hold the facts.
+8. **Verification.** Full suite (`scripts/run_tests.py`): 5,223 tests, with
+   the only failure the `CLAUDE.md` byte budget above; after removing that
+   line, `test_lean_primer` passes (re-run below). pyright gate clean; host
+   packages `--check` clean.
+
+### Reconciliation sweep
+
+| Artifact | Disposition | Rationale |
+|----------|-------------|-----------|
+| Slice deliverables: `skills/independent-review/review.py` + `test_review.py` + `SKILL.md`, `skills/spec-workflow/SKILL.md`, `docs/workflow.md`, this slice file | `updated` | The prompt rule, tests and docs this slice delivers; see the ACs and the deviation log. |
+| Review evidence `reviews/slice-03-{compliance,craft}.md` | `updated` | Gate records; bodies predate deviation 4. `slice-03-reconciliation.md` is written after this review. |
+| `README.md` | `no-op` | Front door does not state the block rule. |
+| `docs/specs/README.md` | `updated` | Regenerated; Notes column now carries spec 122's per-slice invariants. |
+| `docs/specs/122-arch-pass-escalation-and-rounds/spec.md` | `updated` | `status:` rollup written by this slice's transitions. |
+| `docs/product-vision.md` | `no-op` | No scope change. |
+| `docs/architecture.md` | `no-op` | The gate and module boundaries are unchanged; the spec 122 paragraph already states that clearing stays `verdict: pass`. |
+| `docs/decisions/adr-0014-review-evidence-model.md` | `no-op` | Accepted record; its §3 already states the rule this slice conforms to. Its Context section keeps the historical wording (ADR-0010). |
+| Closed spec 031 slices | `no-op` | Records; historical wording kept (ADR-0010). |
+| Scaffold template `templates/docs/workflow.md.template` | `no-op` | Checked and now scanned: its step 6 says `[nit]` entries become reconciliation-log items, which agrees with the rule, and it states no `needs-changes` rule. |
+| `skills/code-health/SKILL.md` | `no-op` | Checked: says `[blocker]` findings block and `[nit]` findings go to the log; no `needs-changes` claim. |
+| Primer surfaces: `CLAUDE.md` / `AGENTS.md` | `no-op` | Spec close checked: spec 122 had no Active-specs entry to compress; a new line would break the primer byte budget, so the invariants live in the status-board Notes. `AGENTS.md` carries no per-spec index. |
+| `docs/inbox.md` | `no-op` | No parked item is resolved by this slice. |
+| `docs/refinement-todo.md` | `no-op` | No decision deferred. |
+| `docs/memory/**` | `no-op` | Checked: the glossary has no block-rule entry to correct. |
+| Generated host packages (`hosts/**`) | `updated` | Rebuilt; `--check` clean. |
+| Files in `main...HEAD` not changed by this slice | `no-op` | Deliberate exclusion: local `main` is behind the branch base `origin/main` (`76aa587`), and slices 122-01/02 landed earlier on this branch; compare against commit `01d87525` (122-02 closed). |
