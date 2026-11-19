@@ -193,6 +193,17 @@ format. Record it as returned: `record-review` prints a `STOP` notice, and
 decision, `blocked_by:` on the slice). `review_evidence.escalations()` is the
 one parser both messages use.
 
+**Round carry-over (spec 122-02).** When the slice already has an arch record
+(`reviews/slice-NN-arch.md`), `review.py arch-review` names it in a "Previous
+round" section placed after "Evaluate": the reviewer reads it only after
+reviewing the current deliverables, gives each earlier finding a status
+(resolved, still open, or withdrawn), and continues the round count. Every arch
+round ends `REASONING` with
+`round: N · open: <ids or none> · searched: <anchors or none>` — the record is
+overwritten in place, so that line is the only state the next round reads
+without git. Only the arch pass gets this, and only for its own record; the ban
+on prior conversation and the implementer's reasoning stays.
+
 ### Frame-critique (adversarial pass — slice 064-03 / ADR-0020, on-demand)
 
 Unlike every other pass, frame-critique runs **PRE-implementation** — it
@@ -380,7 +391,9 @@ with `ESCALATE:` entries: it waits for a person (spec-workflow SKILL.md,
 
 ### What gets put in the prompt automatically
 
-- Standard preamble ("You are seeing this work for the first time")
+- Standard preamble ("You are seeing this work for the first time") — except
+  an arch pass with a previous arch record on disk, which says earlier rounds
+  exist only as files and adds a "Previous round" section (spec 122-02)
 - The slice's full label (helper looks it up from the spec)
 - "What you must NOT do" block (no prior reasoning, no soften, no file writes,
   no `docs/memory/` writes)

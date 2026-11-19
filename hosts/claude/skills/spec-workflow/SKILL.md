@@ -536,8 +536,10 @@ The orchestrator runs the passes in this order:
    `review.py candidates arch_review …`, pick the best, pass `--richer-skill`;
    config (`review.arch_review_skill`) overrides, else jig's baseline buckets
    are inlined. When the helper prints `false`, skip this
-   pass entirely. Slice authors flip the flag by uncommenting the
-   `arch_review: true` line in the slice template's frontmatter — set
+   pass entirely. On a re-run, the prompt points the reviewer at the
+   slice's previous arch record, which it reads after reviewing the
+   deliverables to carry earlier findings forward (spec 122-02). Slice
+   authors flip the flag by uncommenting the `arch_review: true` line in the slice template's frontmatter — set
    it when the slice changes module boundaries, public contracts, or
    architecture-shaped concerns.
 

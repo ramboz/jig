@@ -4359,5 +4359,156 @@ class EscalationRecoveryDocsTests(unittest.TestCase):
         self.assertIn("Escalated arch finding", text)
 
 
+
+# ---------------------------------------------------------------------------
+# Spec 122-02 — the arch pass reads its previous round from disk.
+# ---------------------------------------------------------------------------
+
+
+PREVIOUS_ARCH_RECORD = """\
+---
+slice: 0XX-02 — foo
+pass: arch
+verdict: needs-changes
+reviewer: jig:reviewer
+reviewed_at: 2026-11-01T00:00:00Z
+prompt_source: review.py arch-review x
+---
+
+VERDICT: needs-changes
+
+REASONING:
+One boundary leak.
+round: 1 · open: layering/billing-client · searched: BillingClient
+
+SPECIFIC ISSUES:
+- [blocker][impl] src/billing.py:3 — imports the web layer
+"""
+
+
+class ArchRoundCarryOverTests(unittest.TestCase):
+    """Slice 122-02: with a previous arch record on disk, the arch prompt
+    lets the reviewer read it after its own review; without one, the prompt
+    is today's; other passes never change."""
+
+    def setUp(self):
+        self.tmp = Path(tempfile.mkdtemp(prefix="jig-rev-round-"))
+        self.spec = _make_spec_with_slice(self.tmp / "122-r", "02", "foo",
+                                          arch_review=True)
+        self.record = self.spec.parent / "reviews" / "slice-02-arch.md"
+
+    def tearDown(self):
+        import shutil
+        shutil.rmtree(self.tmp, ignore_errors=True)
+
+    def _write_record(self, pass_name="arch"):
+        path = self.spec.parent / "reviews" / f"slice-02-{pass_name}.md"
+        path.parent.mkdir(parents=True, exist_ok=True)
+        path.write_text(PREVIOUS_ARCH_RECORD)
+        return path
+
+    def _arch(self):
+        r = run_review("arch-review", str(self.spec), "0XX-02", "x.py")
+        self.assertEqual(r.returncode, 0, f"stderr: {r.stderr}")
+        return r.stdout
+
+    def test_previous_record_turns_on_the_carry_over(self):
+        self._write_record()
+        prompt = self._arch()
+        flat = normalize_ws(prompt)
+        self.assertNotIn("seeing this work for the first time", flat)
+        self.assertIn("Earlier review rounds of this slice exist only as "
+                      "files", flat)
+        self.assertIn("## Previous round", prompt)
+        self.assertIn(str(self.record), prompt)
+        self.assertIn("Only after you have reviewed the current "
+                      "deliverables", flat)
+        for status in ("resolved", "still open", "withdrawn"):
+            self.assertIn(status, flat)
+        self.assertIn("round: N · open: <ids> · searched: <anchors>", flat)
+        # The ban on conversation context stays, with one named exception.
+        self.assertIn("implementer's reasoning", flat)
+        self.assertNotIn("Do not refer to any prior reasoning or discussion "
+                         "about this task.", flat)
+        # Read after the review: the section follows "Evaluate".
+        self.assertLess(prompt.index("## Evaluate"),
+                        prompt.index("## Previous round"))
+
+    def test_no_record_keeps_todays_preamble_and_prohibitions(self):
+        prompt = self._arch()
+        flat = normalize_ws(prompt)
+        self.assertIn("seeing this work for the first time", flat)
+        self.assertIn("Do not refer to any prior reasoning or discussion "
+                      "about this task.", flat)
+        self.assertNotIn("## Previous round", prompt)
+
+    def test_another_pass_record_does_not_turn_it_on(self):
+        self._write_record("craft")
+        prompt = self._arch()
+        self.assertNotIn("## Previous round", prompt)
+        self.assertIn("seeing this work for the first time",
+                      normalize_ws(prompt))
+
+    def test_embedded_slice_builds_as_round_one(self):
+        spec = self.tmp / "embedded.md"
+        write_synthetic_spec(spec, "031-02 alpha")
+        r = run_review("arch-review", str(spec), "031-02", "x.py")
+        self.assertEqual(r.returncode, 0, f"stderr: {r.stderr}")
+        self.assertNotIn("## Previous round", r.stdout)
+
+    def test_every_arch_round_asks_for_the_round_line(self):
+        line = ("round: N · open: <ids or none> · searched: "
+                "<anchors or none>")
+        self.assertIn(line, normalize_ws(self._arch()))
+        self._write_record()
+        self.assertIn(line, normalize_ws(self._arch()))
+
+    def test_other_passes_unchanged_by_an_arch_record(self):
+        summary = self.tmp / "health.txt"
+        summary.write_text("clean\n")
+        commands = (
+            ("implementation", "x.py"),
+            ("pr-review", "x.py"),
+            ("code-health", "x.py", "--summary-file", str(summary)),
+            ("reconciliation",),
+            ("frame-critique", "x.py"),
+            ("design-review", "x.py"),
+        )
+
+        def build_all():
+            out = {}
+            for cmd, *rest in commands:
+                r = run_review(cmd, str(self.spec), "0XX-02", *rest)
+                out[cmd] = (r.returncode, r.stdout)
+            return out
+
+        before = build_all()
+        self._write_record()
+        after = build_all()
+        for cmd, _ in ((c[0], c) for c in commands):
+            with self.subTest(cmd=cmd):
+                self.assertEqual(before[cmd], after[cmd])
+                self.assertNotIn("## Previous round", after[cmd][1])
+
+    def test_round_prohibitions_differ_from_the_standard_block(self):
+        import importlib.util
+        spec = importlib.util.spec_from_file_location("review_mod", REVIEW)
+        module = importlib.util.module_from_spec(spec)
+        sys.path.insert(0, str(REVIEW.parent.parent))
+        spec.loader.exec_module(module)
+        self.assertNotEqual(module._ROUND_PROHIBITIONS, module._PROHIBITIONS)
+
+
+class ReviewerAgentRoundExceptionTests(unittest.TestCase):
+    """Slice 122-02 AC5: `agents/reviewer.md` states the same exception."""
+
+    def test_reviewer_agent_names_the_on_disk_exception(self):
+        text = normalize_ws(
+            (REPO_ROOT / "agents" / "reviewer.md").read_text())
+        self.assertIn("previous review record", text)
+        self.assertIn("after you have reviewed the current deliverables",
+                      text)
+        self.assertIn("evidence on disk", text)
+
 if __name__ == "__main__":
     unittest.main()
