@@ -1,5 +1,12 @@
 # Changelog
 
+## [2.18.0](https://github.com/ramboz/jig/compare/v2.17.1...v2.18.0) (2026-11-19)
+
+
+### Features
+
+* **independent-review:** stop on escalated arch findings and carry arch rounds ([#252](https://github.com/ramboz/jig/issues/252)) ([87610a9](https://github.com/ramboz/jig/commit/87610a934f8e5da0fcc1486cafebdae0bef33b89))
+
 ## [2.17.1](https://github.com/ramboz/jig/compare/v2.17.0...v2.17.1) (2026-11-10)
 
 
