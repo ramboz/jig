@@ -378,6 +378,17 @@ boundary to an external eval, and the scaffolded security floor. The
 [ADR index](decisions/) is the canonical, current record of these; they are not
 re-derived here.
 
+### Arch-pass escalation (spec 122)
+
+`review_evidence.escalations()` reads a recorded verdict body for `[blocker]`
+entries whose description starts with `ESCALATE:` — decisions only a person can
+make. `record-review` and the evidence gate use it to change their *message*
+("a person must decide", not "re-run the review"), never whether a pass clears:
+clearing stays `verdict: pass` alone (ADR-0014 §3), so the body is read for
+diagnostics only. The orchestrator parks the decision with `memory.py
+add-inbox` and marks the slice `blocked_by:` (ADR-0057); jig adds no lifecycle
+state for it.
+
 ### Autonomy governance plane (spec 106 / ADR-0051)
 
 `scaffold-init` scaffolds the *scaffoldable half* of an out-of-band governance
@@ -513,8 +524,8 @@ Jig does not interpret arbitrary shell writes or compute a composite.
 Canonical implementation anchors: `skills/_common/design_bindings.py:121,265,287`
 (bounded reader/dispatch), `skills/_common/static_design_bindings.py:90,304,570,755`
 (live Git/explicit alias membership/frozen native roster), and
-`skills/_common/review_evidence.py:523,586` /
-`skills/independent-review/review.py:1973` /
+`skills/_common/review_evidence.py` (`design_freshness_problem`, called from
+`validate_evidence`) / `skills/independent-review/review.py` (`record_review`) /
 `skills/spec-workflow/workflow.py:943` (shared recording/reuse/lifecycle rail).
 
 The [selection/bindings reference](../skills/independent-review/design-bindings.md)

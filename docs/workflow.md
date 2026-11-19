@@ -466,6 +466,12 @@ non-`pass` verdict). To recover:
    by a later `pass` keeps blocking — that is exactly the "superseded
    without a later pass" case the gate is meant to catch.
 
+The exception is an **escalated arch finding**: an arch verdict whose
+`[blocker]` entry starts with `ESCALATE:` is a decision only a person can
+make. Do not fix it or re-run the pass; park it in the inbox and mark the
+slice `blocked_by:` (spec-workflow SKILL.md, "Escalated arch finding").
+`record-review` and the gate both say so.
+
 ## Reconciliation rules
 
 After implementation, before marking DONE:

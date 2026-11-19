@@ -109,6 +109,10 @@ out-of-band flow can bypass it with `JIG_REVIEW_EVIDENCE_GATE=0`.
 **Recovering from a failed review:** address findings, re-run the pass,
 `record-review` again (overwrites the earlier file for that `(slice, pass)`
 in place — git history keeps the prior verdict), then re-run the transition.
+The exception is an arch verdict whose `[blocker]` entry starts with
+`ESCALATE:` — a decision only a person can make. Do not fix it or re-run the
+pass: park it in `docs/inbox.md` and mark the slice `blocked_by:` (see the
+`spec-workflow` skill, "Escalated arch finding").
 
 ## Stocktake
 

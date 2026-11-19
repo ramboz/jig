@@ -1141,7 +1141,8 @@ Some findings are not the implementer's to fix: a path that duplicates
 existing work, effort past what the plan states, a slice tied to no goal
 line, or a hard-to-reverse choice. Report each one with `VERDICT: fail`
 and an entry of the form
-`- [blocker][spec] <file:line> — ESCALATE: <decision> (options: A, B)`.
+`- [blocker][spec] <anchor> — ESCALATE: <decision> (options: A, B)`,
+where the anchor is a file:line or the spec line the decision rests on.
 The workflow then stops this slice and parks the decision for a person;
 nobody tries to fix it.
 

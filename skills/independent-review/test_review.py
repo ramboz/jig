@@ -4287,6 +4287,12 @@ class ArchEscalationRecordNoticeTests(unittest.TestCase):
         self.assertIn("blocked_by:", out)
         self.assertNotIn("retry loop", out)
 
+    def test_escalated_arch_needs_changes_also_prints_stop_notice(self):
+        r = self._record("arch", "needs-changes", ARCH_ESCALATED_BODY)
+        self.assertEqual(r.returncode, 0, f"stderr: {r.stderr}")
+        self.assertIn("STOP", r.stdout)
+        self.assertIn("a person must decide", r.stdout)
+
     def test_other_recordings_print_only_the_recorded_line(self):
         cases = (
             ("arch", "fail", "SPECIFIC ISSUES:\n- [blocker] x.py:1 — bug\n"),

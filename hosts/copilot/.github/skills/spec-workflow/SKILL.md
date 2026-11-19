@@ -648,8 +648,9 @@ findings are decisions only a person can make: a path that duplicates
 existing work, effort past what the plan states, a slice tied to no goal
 line, a hard-to-reverse choice. The arch reviewer reports each as
 `VERDICT: fail` with a `[blocker]` entry whose description starts with
-`ESCALATE:` (`- [blocker][spec] <file:line> — ESCALATE: <decision> (options:
-A, B)`). Do **not** run the recovery above for it — do not fix it and do not
+`ESCALATE:` (`- [blocker][spec] <anchor> — ESCALATE: <decision> (options:
+A, B)`, where the anchor is a file:line or the spec line the decision rests
+on). Do **not** run the recovery above for it — do not fix it and do not
 re-run the pass:
 
 1. `record-review` the arch verdict exactly as the reviewer returned it. It

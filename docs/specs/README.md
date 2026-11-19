@@ -353,6 +353,9 @@
 | [120-generic-design-attestation](120-generic-design-attestation/spec.md) | 120-01 — attest generic static evidence | **DONE** |  |
 | [121-genesis-spec-zero](121-genesis-spec-zero/spec.md) | 121-01 — genesis-seed | **DONE** | seed = `000-adopt-jig` only (ADR-0067); primer/readiness pointers follow the genesis actually present (000 / legacy 001 / none), resolved before render |
 | [121-genesis-spec-zero](121-genesis-spec-zero/spec.md) | 121-02 — retire-genesis | **DONE** | genesis predicate everywhere = slug + `skill: scaffold-init` frontmatter (scaffold, retire-genesis, hint); refuses with no own spec; board excluded from link report |
+| [122-arch-pass-escalation-and-rounds](122-arch-pass-escalation-and-rounds/spec.md) | 122-01 — escalate-stops-the-slice | **DONE** |  |
+| [122-arch-pass-escalation-and-rounds](122-arch-pass-escalation-and-rounds/spec.md) | 122-02 — arch-round-carry-over | DRAFT |  |
+| [122-arch-pass-escalation-and-rounds](122-arch-pass-escalation-and-rounds/spec.md) | 122-03 — one-blocking-rule | DRAFT |  |
 
 ## Deferred slices
 
@@ -396,7 +399,7 @@ Advisory (ADR-0040 auditability — never blocks). Regenerated from `reviews/sli
 
 - **0** pass(es) recorded `not-shown` (selection step did not run — the kill-criterion-1 defect signal).
 - **25** pass(es) recorded `non-interactive` (declared no-orchestrator / CI).
-- **17** shown-and-declined anomaly(ies) (a high-confidence richer skill was shown and not applied):
+- **18** shown-and-declined anomaly(ies) (a high-confidence richer skill was shown and not applied):
   - `088-project-orientation/slice-02-arch.md` — applied `none`; declined: arch-review
   - `088-project-orientation/slice-02-craft.md` — applied `none`; declined: arch-review, independent-review, pr-review, scout-pr-review
   - `113-copilot-third-host/slice-02-arch.md` — applied `none`; declined: arch-review
@@ -414,3 +417,4 @@ Advisory (ADR-0040 auditability — never blocks). Regenerated from `reviews/sli
   - `120-generic-design-attestation/slice-01-craft.md` — applied `scout-pr-review`; declined: arch-review, independent-review, pr-review
   - `121-genesis-spec-zero/slice-01-craft.md` — applied `pr-review`; declined: arch-review, independent-review, scout-pr-review
   - `121-genesis-spec-zero/slice-02-craft.md` — applied `pr-review`; declined: arch-review, independent-review, scout-pr-review
+  - `122-arch-pass-escalation-and-rounds/slice-01-craft.md` — applied `pr-review`; declined: arch-review, independent-review, scout-pr-review

@@ -1045,6 +1045,11 @@ class EscalationParserTests(unittest.TestCase):
                 "- [blocker] src/foo-bar.ts:9 - ESCALATE: pick a store\n")
         self.assertEqual(ev.escalations(text), ["pick a store"])
 
+    def test_anchor_with_en_dash_separator_parses(self):
+        text = ("SPECIFIC ISSUES:\n"
+                "- [blocker] src/foo.ts:9 \u2013 ESCALATE: pick a queue\n")
+        self.assertEqual(ev.escalations(text), ["pick a queue"])
+
     def test_nit_and_strength_entries_ignored(self):
         text = ("SPECIFIC ISSUES:\n"
                 "- [nit] ESCALATE: a nit\n"
@@ -1070,6 +1075,51 @@ class EscalationParserTests(unittest.TestCase):
         fenced = "```\n" + ESCALATED_ENVELOPE + "```\n"
         self.assertEqual(ev.escalations(fenced),
                          ev.escalations(ESCALATED_ENVELOPE))
+
+    def test_fence_lines_stay_out_of_the_decision_text(self):
+        text = ("SPECIFIC ISSUES:\n- [blocker] ESCALATE: pick one\n"
+                "  ```\n  (options: A, B)\n  ```\n")
+        self.assertEqual(ev.escalations(text), ["pick one (options: A, B)"])
+
+    def test_wrapped_envelope_with_inner_snippet_keeps_escalations(self):
+        text = ("```\nVERDICT: fail\n\nSPECIFIC ISSUES:\n"
+                "- [blocker] x.py:1 — wrong call:\n"
+                "  ```python\n  client.retry()\n  ```\n"
+                "- [blocker] ESCALATE: keep or reuse (options: A, B)\n```\n")
+        self.assertEqual(ev.escalations(text),
+                         ["keep or reuse (options: A, B)"])
+
+    def test_fence_inside_the_section_keeps_later_escalations(self):
+        # A code snippet between entries must not end SPECIFIC ISSUES: a
+        # dropped escalation would fall back to "re-run the review".
+        text = ("SPECIFIC ISSUES:\n"
+                "- [blocker] x.py:1 — wrong call:\n"
+                "  ```python\n  client.retry()\n  ```\n"
+                "- [blocker] ESCALATE: keep or reuse the client (options: A, B)\n")
+        self.assertEqual(ev.escalations(text),
+                         ["keep or reuse the client (options: A, B)"])
+
+    def test_annotated_and_bold_headings_parse(self):
+        for heading in ("SPECIFIC ISSUES (round 2, blockers):",
+                        "**SPECIFIC ISSUES:**", "**SPECIFIC ISSUES**"):
+            with self.subTest(heading=heading):
+                text = f"{heading}\n- [blocker] ESCALATE: pick one\n"
+                self.assertEqual(ev.escalations(text), ["pick one"])
+
+    def test_escalation_without_decision_text_still_counts(self):
+        # Fail-safe: an `ESCALATE:` with nothing after it is still a stop.
+        text = "SPECIFIC ISSUES:\n- [blocker] x.md:1 — ESCALATE:\n"
+        self.assertEqual(ev.escalations(text), ["(decision text missing)"])
+
+    def test_empty_anchor_parses(self):
+        text = "SPECIFIC ISSUES:\n- [blocker][spec] — ESCALATE: no goal line\n"
+        self.assertEqual(ev.escalations(text), ["no goal line"])
+
+    def test_bold_or_lowercase_token_parses(self):
+        for token in ("**ESCALATE:**", "Escalate:", "**ESCALATE**:"):
+            with self.subTest(token=token):
+                text = f"SPECIFIC ISSUES:\n- [blocker] x.md:1 — {token} cut scope\n"
+                self.assertEqual(ev.escalations(text), ["cut scope"])
 
     def test_markdown_heading_sections_parse(self):
         # ADR-0014 §2's example body uses `## SPECIFIC ISSUES` headings.
