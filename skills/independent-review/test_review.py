@@ -2474,8 +2474,8 @@ class SpecWorkflowSkillThreePassTests(unittest.TestCase):
       - mention BOTH the compliance and craft passes under
         "After implementation"
       - name the order (compliance → craft)
-      - name the block rule (fail blocks; needs-changes blocks for
-        compliance, becomes a reconciliation-log entry for craft)
+      - name the block rule (only `pass` clears; spec 122-03 aligned the
+        prose with ADR-0014 §3)
     """
 
     SKILL_MD = REPO_ROOT / "skills" / "spec-workflow" / "SKILL.md"
@@ -2525,9 +2525,8 @@ class SpecWorkflowSkillThreePassTests(unittest.TestCase):
 
     def test_after_implementation_names_block_rule(self):
         section = self._after_implementation_section()
-        # The block rule: any `fail` blocks; `needs-changes` is split —
-        # blocks for compliance, becomes a reconciliation-log entry for
-        # craft. Look for "fail" + "block" in the prose.
+        # The block rule: any `fail` / `needs-changes` blocks (ADR-0014 §3).
+        # Look for "fail" + "block" in the prose.
         self.assertRegex(
             section,
             r"(?is)fail.*block|block.*fail",
@@ -4226,6 +4225,385 @@ class Bug017RecordReviewStdinTests(unittest.TestCase):
         )
         self.assertEqual(result.returncode, 0, f"stderr: {result.stderr}")
         self.assertIn("PIPED-BODY-SENTINEL", self._evidence_file().read_text())
+
+
+
+# ---------------------------------------------------------------------------
+# Spec 122-01 — an arch `ESCALATE:` entry stops the slice for a person.
+# ---------------------------------------------------------------------------
+
+
+ARCH_ESCALATED_BODY = """\
+VERDICT: fail
+
+REASONING:
+The slice re-implements an existing client.
+
+SPECIFIC ISSUES:
+- [blocker][spec] src/billing/client.ts:12 — ESCALATE: keep the new client or
+  reuse the existing payments client (options: A keep, B reuse)
+- [blocker][impl] src/billing/client.ts:40 — retry loop never backs off
+
+RECONCILIATION NOTES:
+none
+"""
+
+
+class ArchEscalationRecordNoticeTests(unittest.TestCase):
+    """Slice 122-01 AC3: recording an escalated arch verdict prints a STOP
+    notice after writing the record; every other recording is unchanged."""
+
+    def setUp(self):
+        self.tmp = Path(tempfile.mkdtemp(prefix="jig-rec-esc-"))
+        self.spec = _make_spec_with_slice(self.tmp / "122-x", "02", "foo",
+                                          arch_review=True)
+
+    def tearDown(self):
+        import shutil
+        shutil.rmtree(self.tmp, ignore_errors=True)
+
+    def _record(self, pass_name, verdict, body):
+        return subprocess.run(
+            [sys.executable, str(REVIEW), "record-review", str(self.spec),
+             "0XX-02", "--pass", pass_name, "--verdict", verdict,
+             "--reviewer", "jig:reviewer", "--prompt-source", "review.py x",
+             "--summary-file", "-"],
+            input=body, capture_output=True, text=True,
+            env={**os.environ, "CLAUDE_PLUGIN_ROOT": str(REPO_ROOT)},
+        )
+
+    def test_escalated_arch_fail_prints_stop_notice(self):
+        r = self._record("arch", "fail", ARCH_ESCALATED_BODY)
+        self.assertEqual(r.returncode, 0, f"stderr: {r.stderr}")
+        f = self.spec.parent / "reviews" / "slice-02-arch.md"
+        self.assertTrue(f.is_file())
+        self.assertIn("ESCALATE: keep the new client", f.read_text())
+        out = r.stdout
+        self.assertIn("recorded arch verdict", out)
+        self.assertIn("STOP", out)
+        self.assertIn("reuse the existing payments client", out)
+        self.assertIn("memory.py add-inbox", out)
+        self.assertIn("blocked_by:", out)
+        self.assertNotIn("retry loop", out)
+
+    def test_escalated_arch_needs_changes_also_prints_stop_notice(self):
+        r = self._record("arch", "needs-changes", ARCH_ESCALATED_BODY)
+        self.assertEqual(r.returncode, 0, f"stderr: {r.stderr}")
+        self.assertIn("STOP", r.stdout)
+        self.assertIn("a person must decide", r.stdout)
+
+    def test_other_recordings_print_only_the_recorded_line(self):
+        cases = (
+            ("arch", "fail", "SPECIFIC ISSUES:\n- [blocker] x.py:1 — bug\n"),
+            ("arch", "pass", ARCH_ESCALATED_BODY),
+            ("craft", "fail", ARCH_ESCALATED_BODY),
+        )
+        for pass_name, verdict, body in cases:
+            with self.subTest(pass_name=pass_name, verdict=verdict):
+                r = self._record(pass_name, verdict, body)
+                self.assertEqual(r.returncode, 0, f"stderr: {r.stderr}")
+                lines = r.stdout.splitlines()
+                self.assertEqual(len(lines), 1, r.stdout)
+                self.assertTrue(lines[0].startswith(
+                    f"recorded {pass_name} verdict"), r.stdout)
+
+
+class ArchEscalationPromptTests(unittest.TestCase):
+    """Slice 122-01 AC4: the arch prompt states when and how to escalate."""
+
+    def setUp(self):
+        self.tmpdir = tempfile.mkdtemp(prefix="jig-rev-esc-")
+        self.spec = Path(self.tmpdir) / "spec.md"
+        write_synthetic_spec(self.spec, "031-02 alpha")
+
+    def tearDown(self):
+        import shutil
+        shutil.rmtree(self.tmpdir, ignore_errors=True)
+
+    def test_arch_prompt_states_escalate_format(self):
+        r = run_review("arch-review", str(self.spec), "031-02", "x.py")
+        self.assertEqual(r.returncode, 0, f"stderr: {r.stderr}")
+        prompt = normalize_ws(r.stdout)
+        self.assertIn("ESCALATE: <decision> (options: A, B)", prompt)
+        self.assertIn("VERDICT: fail", prompt)
+        for trigger in ("duplicates existing work", "effort past",
+                        "no goal line", "hard-to-reverse"):
+            self.assertIn(trigger, prompt, trigger)
+
+    def test_craft_prompt_does_not_offer_escalation(self):
+        r = run_review("pr-review", str(self.spec), "031-02", "x.py")
+        self.assertEqual(r.returncode, 0, f"stderr: {r.stderr}")
+        self.assertNotIn("ESCALATE:", r.stdout)
+
+
+class EscalationRecoveryDocsTests(unittest.TestCase):
+    """Slice 122-01 AC5: the recovery docs cover the escalated case."""
+
+    SPEC_WORKFLOW = REPO_ROOT / "skills" / "spec-workflow" / "SKILL.md"
+
+    def test_spec_workflow_recovery_covers_escalation(self):
+        text = normalize_ws(self.SPEC_WORKFLOW.read_text())
+        start = text.find("**Escalated arch finding")
+        self.assertGreater(start, -1,
+                           "spec-workflow SKILL.md needs an "
+                           "'Escalated arch finding' recovery case")
+        case = text[start:start + 2000]
+        for needle in ("ESCALATE:", "memory.py add-inbox", "blocked_by:",
+                       "**Blocked:**", "re-run"):
+            self.assertIn(needle, case, needle)
+
+    def test_independent_review_points_at_the_escalated_case(self):
+        text = normalize_ws(SKILL_MD.read_text())
+        self.assertIn("ESCALATE:", text)
+        self.assertIn("Escalated arch finding", text)
+
+
+
+# ---------------------------------------------------------------------------
+# Spec 122-02 — the arch pass reads its previous round from disk.
+# ---------------------------------------------------------------------------
+
+
+PREVIOUS_ARCH_RECORD = """\
+---
+slice: 0XX-02 — foo
+pass: arch
+verdict: needs-changes
+reviewer: jig:reviewer
+reviewed_at: 2026-11-01T00:00:00Z
+prompt_source: review.py arch-review x
+---
+
+VERDICT: needs-changes
+
+REASONING:
+One boundary leak.
+round: 1 · open: layering/billing-client · searched: BillingClient
+
+SPECIFIC ISSUES:
+- [blocker][impl] src/billing.py:3 — imports the web layer
+"""
+
+
+class ArchRoundCarryOverTests(unittest.TestCase):
+    """Slice 122-02: with a previous arch record on disk, the arch prompt
+    lets the reviewer read it after its own review; without one, the prompt
+    is today's; other passes never change."""
+
+    def setUp(self):
+        self.tmp = Path(tempfile.mkdtemp(prefix="jig-rev-round-"))
+        self.spec = _make_spec_with_slice(self.tmp / "122-r", "02", "foo",
+                                          arch_review=True)
+        self.record = self.spec.parent / "reviews" / "slice-02-arch.md"
+
+    def tearDown(self):
+        import shutil
+        shutil.rmtree(self.tmp, ignore_errors=True)
+
+    def _write_record(self, pass_name="arch"):
+        path = self.spec.parent / "reviews" / f"slice-02-{pass_name}.md"
+        path.parent.mkdir(parents=True, exist_ok=True)
+        path.write_text(PREVIOUS_ARCH_RECORD)
+        return path
+
+    def _arch(self):
+        r = run_review("arch-review", str(self.spec), "0XX-02", "x.py")
+        self.assertEqual(r.returncode, 0, f"stderr: {r.stderr}")
+        return r.stdout
+
+    def test_previous_record_turns_on_the_carry_over(self):
+        self._write_record()
+        prompt = self._arch()
+        flat = normalize_ws(prompt)
+        self.assertNotIn("seeing this work for the first time", flat)
+        self.assertIn("Earlier review rounds of this slice exist only as "
+                      "files", flat)
+        self.assertIn("## Previous round", prompt)
+        self.assertIn(str(self.record), prompt)
+        self.assertIn("Only after you have reviewed the current "
+                      "deliverables", flat)
+        for status in ("resolved", "still open", "withdrawn"):
+            self.assertIn(status, flat)
+        self.assertIn("round: N · open: <ids> · searched: <anchors>", flat)
+        # The ban on conversation context stays, with one named exception.
+        self.assertIn("Do not refer to any prior conversation about this "
+                      "task or to the implementer's reasoning. The one "
+                      "exception is the previous arch record", flat)
+        self.assertNotIn("Do not refer to any prior reasoning or discussion "
+                         "about this task.", flat)
+        # Read after the review: the section follows "Evaluate".
+        self.assertLess(prompt.index("## Evaluate"),
+                        prompt.index("## Previous round"))
+
+    def test_no_record_keeps_todays_preamble_and_prohibitions(self):
+        prompt = self._arch()
+        flat = normalize_ws(prompt)
+        self.assertIn("seeing this work for the first time", flat)
+        self.assertIn("Do not refer to any prior reasoning or discussion "
+                      "about this task.", flat)
+        self.assertNotIn("## Previous round", prompt)
+
+    def test_another_pass_record_does_not_turn_it_on(self):
+        self._write_record("craft")
+        prompt = self._arch()
+        self.assertNotIn("## Previous round", prompt)
+        self.assertIn("seeing this work for the first time",
+                      normalize_ws(prompt))
+
+    def test_embedded_slice_builds_as_round_one(self):
+        spec = self.tmp / "embedded.md"
+        write_synthetic_spec(spec, "031-02 alpha")
+        r = run_review("arch-review", str(spec), "031-02", "x.py")
+        self.assertEqual(r.returncode, 0, f"stderr: {r.stderr}")
+        self.assertNotIn("## Previous round", r.stdout)
+
+    def test_every_arch_round_asks_for_the_round_line(self):
+        line = ("round: N · open: <ids or none> · searched: "
+                "<anchors or none>")
+        self.assertIn(line, normalize_ws(self._arch()))
+        self._write_record()
+        self.assertIn(line, normalize_ws(self._arch()))
+
+    def test_other_passes_unchanged_by_an_arch_record(self):
+        # bug-review is left out: it takes a bug record, not a slice, so a
+        # slice's arch record cannot reach it.
+        summary = self.tmp / "health.txt"
+        summary.write_text("clean\n")
+        commands = (
+            ("implementation", "x.py"),
+            ("pr-review", "x.py"),
+            ("code-health", "x.py", "--summary-file", str(summary)),
+            ("reconciliation",),
+            ("frame-critique", "x.py"),
+            ("design-review", "x.py"),
+        )
+
+        def build_all():
+            out = {}
+            for cmd, *rest in commands:
+                r = run_review(cmd, str(self.spec), "0XX-02", *rest)
+                out[cmd] = (r.returncode, r.stdout)
+            return out
+
+        before = build_all()
+        self._write_record()
+        after = build_all()
+        for cmd, *_ in commands:
+            with self.subTest(cmd=cmd):
+                self.assertEqual(before[cmd][0], 0, f"{cmd} failed to build")
+                self.assertEqual(before[cmd], after[cmd])
+                self.assertNotIn("## Previous round", after[cmd][1])
+
+
+class ReviewerAgentRoundExceptionTests(unittest.TestCase):
+    """Slice 122-02 AC5: `agents/reviewer.md` states the same exception."""
+
+    def test_reviewer_agent_names_the_on_disk_exception(self):
+        text = normalize_ws(
+            (REPO_ROOT / "agents" / "reviewer.md").read_text())
+        self.assertIn("previous review record", text)
+        self.assertIn("after you have reviewed the current deliverables",
+                      text)
+        self.assertIn("evidence on disk", text)
+
+
+# ---------------------------------------------------------------------------
+# Spec 122-03 — one blocking rule (ADR-0014 §3) in the prompt and the docs.
+# ---------------------------------------------------------------------------
+
+
+# Live prose that states the REVIEWED block rule. Closed records (spec
+# slices, accepted ADRs) keep their historical wording (ADR-0010) and are
+# deliberately not scanned; the generated `hosts/` copies mirror `skills/`.
+BLOCK_RULE_LIVE_DOCS = (
+    *sorted((REPO_ROOT / "skills").glob("*/SKILL.md")),
+    REPO_ROOT / "docs" / "workflow.md",
+    REPO_ROOT / "templates" / "docs" / "workflow.md.template",
+    *sorted((REPO_ROOT / "agents").glob("*.md")),
+)
+_NOT_BLOCKING_RE = re.compile(
+    r"(?i)(?:does|do|is)(?:\s+not|n't)\s+block|non-blocking"
+    r"|reconciliation-log\s+item")
+
+
+def _prose_units(text: str):
+    """Split markdown into paragraphs, then each paragraph into its list
+    items, so one bullet is judged on its own."""
+    for para in re.split(r"\n\s*\n", text):
+        yield from re.split(r"\n(?=\s*(?:[-*]|\d+\.)\s)", para)
+
+
+def _needs_changes_offenders(text: str) -> list:
+    """Prose units that pair `needs-changes` with "does not block" (or a
+    variant) or with "reconciliation-log items"."""
+    return [normalize_ws(unit)[:120] for unit in _prose_units(text)
+            if "needs-changes" in unit and _NOT_BLOCKING_RE.search(unit)]
+
+
+class OneBlockingRuleTests(unittest.TestCase):
+    """Slice 122-03: the shared craft/arch/code-health output format states
+    ADR-0014 §3's authoring rule, and no live doc says a `needs-changes`
+    does not block."""
+
+    RULE = "`pass` when no `[blocker]` entry remains"
+
+    def setUp(self):
+        self.tmpdir = tempfile.mkdtemp(prefix="jig-rev-rule-")
+        self.spec = Path(self.tmpdir) / "spec.md"
+        write_synthetic_spec(self.spec, "031-02 alpha")
+
+    def tearDown(self):
+        import shutil
+        shutil.rmtree(self.tmpdir, ignore_errors=True)
+
+    def test_craft_arch_and_code_health_prompts_state_the_rule(self):
+        summary = Path(self.tmpdir) / "health.txt"
+        summary.write_text("clean\n")
+        for args in (("pr-review",), ("arch-review",),
+                     ("code-health", "--summary-file", str(summary))):
+            with self.subTest(command=args[0]):
+                r = run_review(args[0], str(self.spec), "031-02", "x.py",
+                               *args[1:])
+                self.assertEqual(r.returncode, 0, f"stderr: {r.stderr}")
+                flat = normalize_ws(r.stdout)
+                self.assertIn(self.RULE, flat)
+                self.assertIn("`needs-changes` or `fail` when at least one "
+                              "entry is `[blocker]`", flat)
+
+    def test_no_live_doc_says_needs_changes_does_not_block(self):
+        offenders = [f"{path.relative_to(REPO_ROOT)}: {unit}"
+                     for path in BLOCK_RULE_LIVE_DOCS
+                     for unit in _needs_changes_offenders(path.read_text())]
+        self.assertEqual(offenders, [],
+                         "a live doc pairs `needs-changes` with 'does not "
+                         "block' / 'reconciliation-log items' — ADR-0014 §3 "
+                         "says only `pass` clears")
+
+    def test_the_check_flags_the_old_wording(self):
+        # The closed ADR-0014 Context section still carries the pre-122
+        # wording; it is a record, so it is not scanned (ADR-0010). The check
+        # must flag it — otherwise the live-doc scan proves nothing.
+        adr = (REPO_ROOT / "docs" / "decisions" /
+               "adr-0014-review-evidence-model.md").read_text()
+        self.assertTrue(_needs_changes_offenders(adr))
+        for variant in ("doesn't block", "do not block", "is non-blocking"):
+            with self.subTest(variant=variant):
+                self.assertTrue(_needs_changes_offenders(
+                    f"- a craft `needs-changes` {variant}"))
+
+    def test_spec_workflow_states_the_single_rule(self):
+        text = normalize_ws(
+            (REPO_ROOT / "skills" / "spec-workflow" / "SKILL.md").read_text())
+        for clause in (
+            "a pass clears only when its recorded verdict is `pass`",
+            "Any `fail` or `needs-changes` verdict, from any pass, blocks",
+            "`pass` when no `[blocker]` entry remains",
+            "on into the deviation log",
+            "records the verdict the reviewer returned",
+            "never re-records a `needs-changes` as `pass` itself",
+        ):
+            with self.subTest(clause=clause):
+                self.assertIn(clause, text)
 
 
 if __name__ == "__main__":

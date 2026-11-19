@@ -1003,5 +1003,214 @@ class StaleAfterReopenTests(unittest.TestCase):
         self.assertRegex(ev.now_iso8601(), r"^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}Z$")
 
 
+# ---------------------------------------------------------------------------
+# Spec 122-01 — `ESCALATE:` entries in an arch verdict stop the slice.
+# ---------------------------------------------------------------------------
+
+
+ESCALATED_ENVELOPE = """\
+VERDICT: fail
+
+REASONING:
+The slice re-implements an existing client.
+round: 1 · open: duplicates-existing/payments-client · searched: PaymentsClient
+
+SPECIFIC ISSUES:
+- [blocker][spec] src/billing/client.ts:12 — ESCALATE: keep the new client or
+  reuse the existing payments client (options: A keep, B reuse)
+- [blocker][impl] src/billing/client.ts:40 — retry loop never backs off
+- [nit][impl] src/billing/client.ts:3 — ESCALATE: not an escalation (a nit)
+- [blocker] ESCALATE: effort is past the plan's two days (options: A cut, B extend)
+- [blocker][spec] src/a.ts:1 — this mentions ESCALATE: mid-sentence
+
+RECONCILIATION NOTES:
+- [blocker] ESCALATE: under reconciliation notes, ignored
+"""
+
+
+class EscalationParserTests(unittest.TestCase):
+    """Slice 122-01 AC1: `escalations(text)` returns the decision text of
+    every `[blocker]` SPECIFIC ISSUES entry whose description starts with
+    `ESCALATE:`."""
+
+    def test_returns_blocker_escalations_in_order(self):
+        self.assertEqual(ev.escalations(ESCALATED_ENVELOPE), [
+            "keep the new client or reuse the existing payments client "
+            "(options: A keep, B reuse)",
+            "effort is past the plan's two days (options: A cut, B extend)",
+        ])
+
+    def test_anchor_with_hyphen_separator_parses(self):
+        text = ("SPECIFIC ISSUES:\n"
+                "- [blocker] src/foo-bar.ts:9 - ESCALATE: pick a store\n")
+        self.assertEqual(ev.escalations(text), ["pick a store"])
+
+    def test_anchor_with_en_dash_separator_parses(self):
+        text = ("SPECIFIC ISSUES:\n"
+                "- [blocker] src/foo.ts:9 \u2013 ESCALATE: pick a queue\n")
+        self.assertEqual(ev.escalations(text), ["pick a queue"])
+
+    def test_nit_and_strength_entries_ignored(self):
+        text = ("SPECIFIC ISSUES:\n"
+                "- [nit] ESCALATE: a nit\n"
+                "- [strength][impl] x.py:1 — ESCALATE: a strength\n")
+        self.assertEqual(ev.escalations(text), [])
+
+    def test_mid_sentence_escalate_ignored(self):
+        text = ("SPECIFIC ISSUES:\n"
+                "- [blocker] x.py:1 — we might ESCALATE: later\n"
+                "- [blocker] x.py:2 — note - then ESCALATE: no\n")
+        self.assertEqual(ev.escalations(text), [])
+
+    def test_outside_specific_issues_ignored(self):
+        text = ("REASONING:\n- [blocker] ESCALATE: in reasoning\n\n"
+                "RECONCILIATION NOTES:\n- [blocker] ESCALATE: in notes\n")
+        self.assertEqual(ev.escalations(text), [])
+
+    def test_no_specific_issues_section_is_empty(self):
+        self.assertEqual(ev.escalations("VERDICT: fail\n\nREASONING:\nx\n"), [])
+        self.assertEqual(ev.escalations(""), [])
+
+    def test_fenced_envelope_parses_like_unfenced(self):
+        fenced = "```\n" + ESCALATED_ENVELOPE + "```\n"
+        self.assertEqual(ev.escalations(fenced),
+                         ev.escalations(ESCALATED_ENVELOPE))
+
+    def test_fence_lines_stay_out_of_the_decision_text(self):
+        text = ("SPECIFIC ISSUES:\n- [blocker] ESCALATE: pick one\n"
+                "  ```\n  (options: A, B)\n  ```\n")
+        self.assertEqual(ev.escalations(text), ["pick one (options: A, B)"])
+
+    def test_wrapped_envelope_with_inner_snippet_keeps_escalations(self):
+        text = ("```\nVERDICT: fail\n\nSPECIFIC ISSUES:\n"
+                "- [blocker] x.py:1 — wrong call:\n"
+                "  ```python\n  client.retry()\n  ```\n"
+                "- [blocker] ESCALATE: keep or reuse (options: A, B)\n```\n")
+        self.assertEqual(ev.escalations(text),
+                         ["keep or reuse (options: A, B)"])
+
+    def test_fence_inside_the_section_keeps_later_escalations(self):
+        # A code snippet between entries must not end SPECIFIC ISSUES: a
+        # dropped escalation would fall back to "re-run the review".
+        text = ("SPECIFIC ISSUES:\n"
+                "- [blocker] x.py:1 — wrong call:\n"
+                "  ```python\n  client.retry()\n  ```\n"
+                "- [blocker] ESCALATE: keep or reuse the client (options: A, B)\n")
+        self.assertEqual(ev.escalations(text),
+                         ["keep or reuse the client (options: A, B)"])
+
+    def test_annotated_and_bold_headings_parse(self):
+        for heading in ("SPECIFIC ISSUES (round 2, blockers):",
+                        "**SPECIFIC ISSUES:**", "**SPECIFIC ISSUES**"):
+            with self.subTest(heading=heading):
+                text = f"{heading}\n- [blocker] ESCALATE: pick one\n"
+                self.assertEqual(ev.escalations(text), ["pick one"])
+
+    def test_escalation_without_decision_text_still_counts(self):
+        # Fail-safe: an `ESCALATE:` with nothing after it is still a stop.
+        text = "SPECIFIC ISSUES:\n- [blocker] x.md:1 — ESCALATE:\n"
+        self.assertEqual(ev.escalations(text), ["(decision text missing)"])
+
+    def test_empty_anchor_parses(self):
+        text = "SPECIFIC ISSUES:\n- [blocker][spec] — ESCALATE: no goal line\n"
+        self.assertEqual(ev.escalations(text), ["no goal line"])
+
+    def test_bold_or_lowercase_token_parses(self):
+        for token in ("**ESCALATE:**", "Escalate:", "**ESCALATE**:"):
+            with self.subTest(token=token):
+                text = f"SPECIFIC ISSUES:\n- [blocker] x.md:1 — {token} cut scope\n"
+                self.assertEqual(ev.escalations(text), ["cut scope"])
+
+    def test_markdown_heading_sections_parse(self):
+        # ADR-0014 §2's example body uses `## SPECIFIC ISSUES` headings.
+        text = ("## VERDICT\nfail\n\n## SPECIFIC ISSUES\n"
+                "- [blocker] ESCALATE: choose a queue (options: A, B)\n\n"
+                "## RECONCILIATION NOTES\n- [blocker] ESCALATE: ignored\n")
+        self.assertEqual(ev.escalations(text),
+                         ["choose a queue (options: A, B)"])
+
+
+class EscalationGateDiagnosticTests(unittest.TestCase):
+    """Slice 122-01 AC2: an escalated arch record still blocks, and its
+    diagnostic says a person decides instead of "re-run the review"."""
+
+    def setUp(self):
+        self.tmp = Path(tempfile.mkdtemp(prefix="jig-ev-escalate-"))
+
+    def tearDown(self):
+        import shutil
+        shutil.rmtree(self.tmp, ignore_errors=True)
+
+    def _spec(self, slug):
+        spec = write_spec_with_slice(self.tmp / slug, "02", "thing",
+                                     arch_review=True)
+        write_verdict_file(spec.parent, "02", "compliance", verdict="pass")
+        write_verdict_file(spec.parent, "02", "craft", verdict="pass")
+        return spec
+
+    def _arch_diags(self, spec):
+        diags = ev.validate_evidence(spec, "0XX-02", "REVIEWED")
+        return [d for d in diags if d.startswith("[arch]")]
+
+    def test_escalated_fail_blocks_and_names_each_decision(self):
+        spec = self._spec("122-a")
+        write_verdict_file(spec.parent, "02", "arch", verdict="fail",
+                           body=ESCALATED_ENVELOPE)
+        diags = self._arch_diags(spec)
+        self.assertEqual(len(diags), 1, diags)
+        diag = diags[0]
+        self.assertIn("a person must decide", diag)
+        self.assertIn("reuse the existing payments client", diag)
+        self.assertIn("effort is past the plan's two days", diag)
+        self.assertIn("memory.py add-inbox", diag)
+        self.assertIn("blocked_by:", diag)
+        self.assertNotIn("re-record a 'pass'", diag)
+        self.assertNotIn("--verdict pass", diag)
+
+    def test_escalated_needs_changes_also_stops(self):
+        # Fail-safe: a non-`pass` arch record with an escalation is never
+        # handed back to the fix loop, whatever its verdict word.
+        spec = self._spec("122-b")
+        write_verdict_file(spec.parent, "02", "arch", verdict="needs-changes",
+                           body=ESCALATED_ENVELOPE)
+        diags = self._arch_diags(spec)
+        self.assertEqual(len(diags), 1, diags)
+        self.assertIn("a person must decide", diags[0])
+
+    def test_arch_fail_without_escalation_keeps_todays_diagnostic(self):
+        spec = self._spec("122-c")
+        write_verdict_file(spec.parent, "02", "arch", verdict="fail",
+                           body="SPECIFIC ISSUES:\n- [blocker] x.py:1 — bug\n")
+        diags = self._arch_diags(spec)
+        self.assertEqual(len(diags), 1, diags)
+        self.assertIn("re-record a 'pass'", diags[0])
+        self.assertNotIn("a person must decide", diags[0])
+
+    def test_escalation_in_a_pass_record_clears(self):
+        spec = self._spec("122-d")
+        write_verdict_file(spec.parent, "02", "arch", verdict="pass",
+                           body=ESCALATED_ENVELOPE)
+        self.assertEqual(ev.validate_evidence(spec, "0XX-02", "REVIEWED"), [])
+
+    def test_craft_escalation_keeps_todays_diagnostic(self):
+        spec = write_spec_with_slice(self.tmp / "122-e", "02", "thing")
+        write_verdict_file(spec.parent, "02", "compliance", verdict="pass")
+        write_verdict_file(spec.parent, "02", "craft", verdict="fail",
+                           body=ESCALATED_ENVELOPE)
+        diags = ev.validate_evidence(spec, "0XX-02", "REVIEWED")
+        self.assertEqual(len(diags), 1, diags)
+        self.assertIn("re-record a 'pass'", diags[0])
+
+    def test_malformed_escalated_record_keeps_generic_diagnostics(self):
+        spec = self._spec("122-f")
+        write_verdict_file(spec.parent, "02", "arch", verdict="fail",
+                           omit=("reviewer",), body=ESCALATED_ENVELOPE)
+        diags = self._arch_diags(spec)
+        self.assertTrue(any("missing required field 'reviewer'" in d
+                            for d in diags), diags)
+        self.assertFalse(any("a person must decide" in d for d in diags),
+                         diags)
+
+
 if __name__ == "__main__":
     unittest.main()

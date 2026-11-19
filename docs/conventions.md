@@ -60,7 +60,10 @@
 
 **Rule:** Reviewer system prompt must include: "You are seeing this work for the first time."
 **Why:** Breaks the implicit assumption of shared context.
-**How to apply:** First paragraph of every reviewer invocation prompt.
+**How to apply:** First paragraph of every reviewer invocation prompt. The one
+exception is an arch pass whose prompt names the slice's previous arch record
+(spec 122-02): that prompt says earlier rounds exist only as files on disk, and
+the ban on prior conversation and the implementer's reasoning still applies.
 
 ## Document conventions
 

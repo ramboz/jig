@@ -381,14 +381,17 @@ and REVIEWED — two always-on, two gated on slice frontmatter flags.
    makes the pass work on a subagent that has no `Skill` tool: a prose
    skill-router instruction would be inert there.) Output: scope / blockers /
    nits / strengths, wrapped in the same verdict envelope; SPECIFIC ISSUES entries
-   tagged `[blocker]` / `[nit]` / `[strength]`. Only `[blocker]`-tagged
-   entries block; `[nit]` and `needs-changes` become reconciliation-log
-   items.
+   tagged `[blocker]` / `[nit]` / `[strength]`. The reviewer returns `pass`
+   when no `[blocker]` entry remains (nits go to the deviation log) and
+   `needs-changes` / `fail` otherwise; only `pass` clears the gate
+   (ADR-0014 §3).
 3. **Arch pass — `arch-review`** (on-demand). Runs only when the
    slice's frontmatter declares `arch_review: true`. Same file-read
    dispatch (`~/.claude/skills/arch-review/`, else jig's baseline).
    Output: summary / strengths / concerns / open questions. Same block
-   rule as the craft pass.
+   rule as the craft pass. On a re-run, the prompt names the slice's previous
+   arch record; the reviewer reads it after its own review, gives each earlier
+   finding a status, and continues the `round: N` line (spec 122-02).
 4. **Code-health pass — `jig:code-health`** (on-demand, **gated** by
    `code_health_review: true`). The orchestrator runs `health.py` and feeds
    its **tight summary** into `review.py code-health … --summary-file`; the
@@ -407,6 +410,8 @@ The reviewer's isolation is prompt- and tool-scoped — a self-contained
 prompt plus read-only tools — not a hard sandbox (parent context is
 technically reachable; see `skills/independent-review/SKILL.md`
 § Context isolation pattern). It works reliably when the prompt is sharp.
+The one file a reviewer reads from an earlier round is the arch pass's own
+previous record — evidence on disk, never the implementer's conversation.
 
 ### Recording verdict evidence (the gate's input)
 
@@ -465,6 +470,12 @@ non-`pass` verdict). To recover:
    `pass`, the gate clears. A non-`pass` artifact that was never overwritten
    by a later `pass` keeps blocking — that is exactly the "superseded
    without a later pass" case the gate is meant to catch.
+
+The exception is an **escalated arch finding**: an arch verdict whose
+`[blocker]` entry starts with `ESCALATE:` is a decision only a person can
+make. Do not fix it or re-run the pass; park it in the inbox and mark the
+slice `blocked_by:` (spec-workflow SKILL.md, "Escalated arch finding").
+`record-review` and the gate both say so.
 
 ## Reconciliation rules
 

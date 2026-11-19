@@ -190,13 +190,18 @@ class VerdictRecord:
             is well-formed AND clears the gate.
         clears: True iff the file exists, parses, pass/verdict are
             in-vocabulary, and `verdict == pass` (ADR-0014 §3).
+        well_formed: True iff the file exists, parses, carries every
+            required field, and pass/verdict are in-vocabulary — whatever
+            the verdict (spec 122-01 reads escalations only from these).
     """
 
-    def __init__(self, path: Path, fields: dict, problems: list, clears: bool):
+    def __init__(self, path: Path, fields: dict, problems: list, clears: bool,
+                 well_formed: bool = False):
         self.path = path
         self.fields = fields
         self.problems = problems
         self.clears = clears
+        self.well_formed = well_formed
 
 
 def _slice_number(spec_path, slice_fragment: str) -> tuple:
@@ -440,12 +445,10 @@ def parse_verdict_file(path, required_fields=REQUIRED_FIELDS) -> VerdictRecord:
             f"of {', '.join(VERDICTS)}"
         )
 
-    clears = (
-        not problems
-        and verdict_val is not None
-        and verdict_clears(verdict_val)
-    )
-    if not problems and not clears:
+    well_formed = not problems and verdict_val is not None
+    clears = (well_formed and verdict_val is not None
+              and verdict_clears(verdict_val))
+    if well_formed and not clears:
         # Well-formed but non-clearing (e.g. fail / needs-changes not yet
         # overwritten by a later pass — the superseded-only case, ADR §4).
         problems.append(
@@ -454,7 +457,123 @@ def parse_verdict_file(path, required_fields=REQUIRED_FIELDS) -> VerdictRecord:
             f"re-record a 'pass' once resolved)"
         )
 
-    return VerdictRecord(path, fields, problems, clears)
+    return VerdictRecord(path, fields, problems, clears,
+                         well_formed=well_formed)
+
+
+# ---------------------------------------------------------------------------
+# Spec 122-01: escalations — decisions only a person can make.
+#
+# An arch reviewer reports a decision the implementer must not make (a
+# duplicated path, effort past plan, a slice tied to no goal line, a
+# hard-to-reverse choice) as a `[blocker]` SPECIFIC ISSUES entry whose
+# description starts with `ESCALATE:`. Such a record still blocks (it is not
+# `pass`); these helpers let `record-review` and the gate say "a person
+# decides" instead of "re-run the review". The orchestrator then parks the
+# decision with `memory.py add-inbox` and marks the slice `blocked_by:`.
+# ---------------------------------------------------------------------------
+
+# An envelope section heading: `SPECIFIC ISSUES:` (the reviewer envelope),
+# `## SPECIFIC ISSUES` (ADR-0014 §2's recorded-body example), a bold
+# `**SPECIFIC ISSUES:**`, or an annotated `SPECIFIC ISSUES (round 2):` (seen
+# in recorded bodies). `VERDICT: fail` and `REASONING: …` may carry content
+# on the same line.
+_ENVELOPE_HEADING_RE = re.compile(
+    r"^\s*(?:#{1,6}\s*)?\**\s*"
+    r"(VERDICT|REASONING|SPECIFIC ISSUES|RECONCILIATION NOTES)"
+    r"\s*(?:\([^)\n]*\))?\s*\**\s*(?::.*)?$"
+)
+# A tagged entry: `- [blocker][spec] <description>`.
+_TAGGED_ENTRY_RE = re.compile(r"^\s*[-*]\s+((?:\[[^\]\n]*\]\s*)+)(.*)$")
+# The description starts with `ESCALATE:`, directly or after an anchor (which
+# may be empty) and a ` — ` / ` – ` / ` - ` separator. The anchor may not
+# itself contain a separator, so a later "… — then ESCALATE:" does not count.
+# The token is matched case-insensitively and may be bold (`**ESCALATE:**`):
+# a missed escalation would hand a person's decision back to the fix loop.
+_ESCALATE_DESC_RE = re.compile(
+    r"^(?:(?:(?!\s[—–-]\s).)*?\s*[—–-]\s+)?"
+    r"\**(?i:escalate)\**:\**"
+    r"\s*(?P<decision>.*)$"
+)
+
+
+def escalations(text: str) -> list:
+    """Return the decision text of each escalated entry in a verdict body.
+
+    An entry counts when it sits under `SPECIFIC ISSUES`, carries a
+    `[blocker]` tag, and its description starts with `ESCALATE:` (see
+    `_ESCALATE_DESC_RE`). Indented continuation lines are joined onto their
+    entry. Code-fence lines are skipped and never start or end a section:
+    a fence can wrap the envelope or a snippet inside an entry, and telling
+    them apart risks dropping an escalation. Erring this way can only read
+    an extra escalation, never miss one. Returns `[]` when there is no
+    `SPECIFIC ISSUES` section. Never raises.
+    """
+    found: list = []
+    in_issues = False
+    entry = None  # (tags, description) of the entry being read
+
+    def flush():
+        nonlocal entry
+        if entry is not None:
+            tags, desc = entry
+            if "blocker" in tags:
+                m = _ESCALATE_DESC_RE.match(desc.strip())
+                if m:
+                    found.append(m.group("decision").strip()
+                                 or "(decision text missing)")
+        entry = None
+
+    for line in (text or "").splitlines():
+        if line.strip().startswith("```"):
+            continue  # neutral: see the docstring
+        heading = _ENVELOPE_HEADING_RE.match(line)
+        if heading:
+            flush()
+            in_issues = heading.group(1) == "SPECIFIC ISSUES"
+            continue
+        if not in_issues:
+            continue
+        tagged = _TAGGED_ENTRY_RE.match(line)
+        if tagged:
+            flush()
+            tags = {t.strip().lower()
+                    for t in re.findall(r"\[([^\]\n]*)\]", tagged.group(1))}
+            entry = (tags, tagged.group(2))
+        elif entry is not None and line[:1].isspace() and line.strip():
+            entry = (entry[0], f"{entry[1]} {line.strip()}")
+        else:
+            flush()
+    flush()
+    return found
+
+
+def escalation_guidance(decisions: list, record) -> str:
+    """The shared "a person decides" message for `decisions` escalated in
+    the arch record at `record` (used by the gate and by `record-review`)."""
+    listed = "; ".join(f"({i}) {d}" for i, d in enumerate(decisions, 1))
+    return (
+        f"escalated — {len(decisions)} decision(s) a person must decide: "
+        f"{listed}. Do not fix these or re-run the arch pass. "
+        f"Park each one in the project inbox with its options and the "
+        f"record path {record} (`memory.py add-inbox`), set `blocked_by:` "
+        f"and a `**Blocked:**` line on the slice, and stop work on it. "
+        f"Re-run the arch pass once a person has decided (spec-workflow "
+        f"SKILL.md, \"Escalated arch finding\")."
+    )
+
+
+def escalated_decisions(rec: VerdictRecord) -> list:
+    """Escalations in a well-formed, non-`pass` verdict record; `[]` for a
+    clearing, missing or malformed record (those keep their own
+    diagnostics). Read for the diagnostic only — never for clearing, which
+    stays `verdict: pass` alone (ADR-0014 §3)."""
+    if rec.clears or not rec.well_formed:
+        return []
+    try:
+        return escalations(rec.path.read_text(encoding="utf-8"))
+    except (OSError, UnicodeError):
+        return []
 
 
 # Slice 045-03 (must-do d): the arch-review truthy set is now owned by
@@ -576,6 +695,16 @@ def validate_evidence(spec_path, slice_fragment: str, stage: str) -> list:
             diagnostics.append(str(exc))
             continue
         rec = parse_verdict_file(path)
+        if pass_name == "arch":
+            # Spec 122-01: an escalated arch record still blocks, but the
+            # next step is a person's decision, not a re-run.
+            decisions = escalated_decisions(rec)
+            if decisions:
+                diagnostics.append(
+                    f"[arch] {path.name}: "
+                    f"{escalation_guidance(decisions, path)}"
+                )
+                continue
         problems = list(rec.problems) if not rec.clears else []
         if rec.clears and stage != "READY_FOR_REVIEW":
             # Bug 039: frame-critique (READY_FOR_REVIEW) is a one-time

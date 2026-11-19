@@ -150,6 +150,57 @@ _PROHIBITIONS = """\
   or modifying the hot cache are jobs for `memory-sync`, not the reviewer.
 """
 
+# Spec 122-02: the arch pass may read ITS OWN previous round from disk. These
+# replace `_PREAMBLE` / the first `_PROHIBITIONS` bullet only when such a record
+# exists; every other pass, and a first arch round, keep the standard text.
+_ROUND_PREAMBLE = (
+    "You are an independent reviewer. You have not discussed this task with "
+    "anyone — evaluate only what is in the files. Earlier review rounds of "
+    "this slice exist only as files on disk."
+)
+_ROUND_PROHIBITIONS = _PROHIBITIONS.replace(
+    "- Do not refer to any prior reasoning or discussion about this task.\n",
+    "- Do not refer to any prior conversation about this task or to the\n"
+    "  implementer's reasoning. The one exception is the previous arch record\n"
+    "  named under \"Previous round\" below: it is evidence on disk, read\n"
+    "  after your own review.\n",
+)
+
+_ROUND_LINE_BLOCK = """\
+## Round line
+
+End `REASONING` with one line:
+`round: N · open: <ids or none> · searched: <anchors or none>`.
+`N` is this round's number (1 unless a \"Previous round\" section names a
+previous record).
+An id is a short stable name for a finding — what is wrong and the path it
+anchors to, no line number — so a later round can match it."""
+
+
+def _previous_arch_record(spec_path, slice_label: str) -> "Path | None":
+    """The slice's previous arch verdict record, if one exists on disk
+    (ADR-0014 §1 path). None for a first round or an embedded slice."""
+    try:
+        path = _evidence.evidence_path(spec_path, slice_label, "arch")
+    except _evidence.EvidenceError:
+        return None
+    return path if path.is_file() else None
+
+
+def _previous_round_block(record: Path) -> str:
+    return f"""## Previous round (read after your own review)
+
+This slice was reviewed before. The previous arch record is `{record}`.
+Only after you have reviewed the current deliverables above, read that
+record and give each of its findings a status — resolved, still open, or
+withdrawn (say why) — in your REASONING or SPECIFIC ISSUES. Keep an
+earlier finding's id while it is still open. Its last `REASONING` line
+reads `round: N · open: <ids> · searched: <anchors>`; your round is N+1
+(with no such line, the previous round was round 1). The record is
+evidence on disk, not the implementer's reasoning.
+"""
+
+
 _OUTPUT_FORMAT = """\
 ## Output (required — do not deviate)
 
@@ -857,6 +908,11 @@ RECONCILIATION NOTES:
  block the REVIEWED transition>
 ```
 
+Verdict rule (ADR-0014 §3): `pass` when no `[blocker]` entry remains —
+nits and strengths go in RECONCILIATION NOTES and do not block;
+`needs-changes` or `fail` when at least one entry is `[blocker]`. The
+gate clears only on `pass`.
+
 Be terse but specific. Cite file:line when flagging issues."""
 
 
@@ -1059,6 +1115,10 @@ def build_arch_review_prompt(spec_path: Path, slice_label: str,
     """
     slice_noun, slice_ref = _slice_source(spec_path, slice_path)
     deliverable_lines = "\n".join(f"   - `{d}`" for d in deliverables)
+    previous = _previous_arch_record(spec_path, slice_label)
+    preamble = _ROUND_PREAMBLE if previous else _PREAMBLE
+    prohibitions = _ROUND_PROHIBITIONS if previous else _PROHIBITIONS
+    previous_block = _previous_round_block(previous) + "\n" if previous else ""
     richer = _resolve_richer_for_pass(
         spec_path, slice_label, "arch_review", "arch",
         richer_skill, non_interactive)
@@ -1079,7 +1139,7 @@ def build_arch_review_prompt(spec_path: Path, slice_label: str,
             "Apply the architectural concerns from jig's bundled `arch-review` "
             "SKILL.md baseline. Its four canonical output buckets are:"
         )
-    return f"""{_PREAMBLE}
+    return f"""{preamble}
 
 ## Your job
 
@@ -1117,7 +1177,7 @@ boundaries, public contracts, and design coherence?
    composes with existing architecture (read-only).
 
 {_INVESTIGATION}
-{_PROHIBITIONS}
+{prohibitions}
 ## Evaluate
 
 - Does the change preserve module boundaries documented in
@@ -1134,6 +1194,19 @@ boundaries, public contracts, and design coherence?
   Anchor "simpler" to still meeting the acceptance criteria
   (leaner-that-still-passes) — never stripping behavior the ACs require.
 - What architectural decisions does the change get right?
+
+## Decisions only a person can make
+
+Some findings are not the implementer's to fix: a path that duplicates
+existing work, effort past what the plan states, a slice tied to no goal
+line, or a hard-to-reverse choice. Report each one with `VERDICT: fail`
+and an entry of the form
+`- [blocker][spec] <anchor> — ESCALATE: <decision> (options: A, B)`,
+where the anchor is a file:line or the spec line the decision rests on.
+The workflow then stops this slice and parks the decision for a person;
+nobody tries to fix it.
+
+{previous_block}{_ROUND_LINE_BLOCK}
 
 {_PR_REVIEW_OUTPUT_FORMAT}
 """
@@ -2006,6 +2079,15 @@ def record_review(args) -> int:
     out_path.parent.mkdir(parents=True, exist_ok=True)
     atomic_write_text(out_path, content)
     sys.stdout.write(f"recorded {args.pass_name} verdict → {out_path}\n")
+    if args.pass_name == "arch" and args.verdict != "pass":
+        # Spec 122-01: an escalated arch verdict is a person's decision, not
+        # a finding to fix — say so at the moment it is recorded.
+        decisions = _evidence.escalations(body)
+        if decisions:
+            sys.stdout.write(
+                f"STOP — slice {slice_label}: "
+                f"{_evidence.escalation_guidance(decisions, out_path)}\n"
+            )
     return 0
 
 

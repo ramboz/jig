@@ -137,8 +137,10 @@ Codex's skill router resolves user > project > `jig:pr-review` precedence
 via the skill description hints. The pass returns the canonical four output
 buckets (scope / blockers / nits / strengths) wrapped in the same verdict
 envelope as the compliance pass. SPECIFIC ISSUES entries are tagged
-`[blocker]` / `[nit]` / `[strength]`; only `[blocker]` entries block the
-REVIEWED transition.
+`[blocker]` / `[nit]` / `[strength]`. The reviewer returns `pass` when no
+`[blocker]` entry remains (nits go to the deviation log) and
+`needs-changes` / `fail` otherwise; the gate clears only on `pass`
+(ADR-0014 §3).
 
 ### Arch-review (architecture pass — slice 031-02, on-demand)
 
@@ -174,13 +176,38 @@ When `$NEED_ARCH` is `true`, feed `[jig:phase=arch] [jig:spec=NNN]
 dispatch as `pr-review` to the most-specific `arch-review` SKILL.md
 reachable. The pass returns the canonical four arch output buckets (summary /
 strengths / concerns / open questions). Tag and block semantics match the
-craft pass: `[blocker]` entries block the REVIEWED transition; `[nit]`
-entries and `needs-changes` become reconciliation-log items.
+craft pass: a review whose entries are only `[nit]` / `[strength]` returns
+`pass` (nits go to the deviation log); any `[blocker]` entry makes it
+`needs-changes` or `fail`, which blocks the REVIEWED transition.
 
 Slice authors set `arch_review: true` in the slice file's frontmatter
 when the slice changes module boundaries, public contracts, or
 architecture-shaped concerns. The slice template ships the field
 commented out as a discoverability nudge.
+
+**Escalation (spec 122-01).** A decision only a person can make (a
+duplicated path, effort past plan, a slice tied to no goal line, a
+hard-to-reverse choice) comes back as `VERDICT: fail` with a `[blocker]`
+entry whose description starts with `ESCALATE:`; the arch prompt states the
+format. Record it as returned: `record-review` prints a `STOP` notice, and
+`check-reviews` / `transition` refuse with "a person must decide" rather than
+"re-run the review". Do not fix it or re-run the pass — follow
+`spec-workflow` SKILL.md's **Escalated arch finding** case (an inbox entry per
+decision, `blocked_by:` on the slice). `review_evidence.escalations()` is the
+one parser both messages use.
+
+**Round carry-over (spec 122-02).** When the slice already has an arch record
+(`reviews/slice-NN-arch.md`), `review.py arch-review` names it in a "Previous
+round" section placed after "Evaluate": the reviewer reads it only after
+reviewing the current deliverables, gives each earlier finding a status
+(resolved, still open, or withdrawn), and continues the round count. Every arch
+round ends `REASONING` with
+`round: N · open: <ids or none> · searched: <anchors or none>` — the record is
+overwritten in place, so that line is the only history of rounds before the
+last that survives without git. Record the arch envelope as the reviewer
+returned it, or the line is lost and the count restarts. Only the arch pass
+gets this, and only for its own record; the ban on prior conversation and the
+implementer's reasoning stays.
 
 ### Frame-critique (adversarial pass — slice 064-03 / ADR-0020, on-demand)
 
@@ -363,11 +390,15 @@ bypasses the gate with `JIG_REVIEW_EVIDENCE_GATE=0`. **Recovering from a
 failed review:** address the findings, re-run the pass, `record-review`
 again (overwrites the earlier file for that `(slice, pass)` in place — git
 history is the audit trail), then re-run the transition; with every
-required pass now `pass`, the gate clears.
+required pass now `pass`, the gate clears. The exception is an arch verdict
+with `ESCALATE:` entries: it waits for a person (spec-workflow SKILL.md,
+**Escalated arch finding**), and the gate's diagnostic says so.
 
 ### What gets put in the prompt automatically
 
-- Standard preamble ("You are seeing this work for the first time")
+- Standard preamble ("You are seeing this work for the first time") — except
+  an arch pass with a previous arch record on disk, which says earlier rounds
+  exist only as files and adds a "Previous round" section (spec 122-02)
 - The slice's full label (helper looks it up from the spec)
 - "What you must NOT do" block (no prior reasoning, no soften, no file writes,
   no `docs/memory/` writes)

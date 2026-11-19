@@ -536,8 +536,10 @@ The orchestrator runs the passes in this order:
    `review.py candidates arch_review …`, pick the best, pass `--richer-skill`;
    config (`review.arch_review_skill`) overrides, else jig's baseline buckets
    are inlined. When the helper prints `false`, skip this
-   pass entirely. Slice authors flip the flag by uncommenting the
-   `arch_review: true` line in the slice template's frontmatter — set
+   pass entirely. On a re-run, the prompt points the reviewer at the
+   slice's previous arch record, which it reads after reviewing the
+   deliverables to carry earlier findings forward (spec 122-02). Slice
+   authors flip the flag by uncommenting the `arch_review: true` line in the slice template's frontmatter — set
    it when the slice changes module boundaries, public contracts, or
    architecture-shaped concerns.
 
@@ -570,20 +572,22 @@ tags before the `review.py` body: `[jig:phase=<phase>] [jig:spec=NNN]
 when `code_health_review: true`) must pass before
 `transition <slice> REVIEWED`:
 
-- Any `fail` verdict from any pass blocks the transition.
-- `needs-changes` from the compliance pass blocks (the implementer
-  addresses findings and re-runs).
-- `needs-changes` from the craft pass does NOT block — the
-  `[nit]`-tagged entries become reconciliation-log items (the
-  implementer captures them in the deviation log during reconciliation).
-  Only `[blocker]`-tagged entries from the craft pass block the
-  transition.
-- The arch pass follows the same rule as the craft pass:
-  `[blocker]`-tagged entries block; `[nit]`-tagged entries and
-  `needs-changes` become reconciliation-log items.
-- The code-health pass follows the same rule: `[blocker]`-tagged entries
-  block the `REVIEWED` transition; `[nit]`-tagged entries become
-  reconciliation-log items.
+One rule, the one the gate enforces
+([ADR-0014](../../docs/decisions/adr-0014-review-evidence-model.md) §3): a
+pass clears only when its recorded verdict is `pass`.
+
+- Any `fail` or `needs-changes` verdict, from any pass, blocks the
+  transition. The implementer addresses the findings and the pass is re-run —
+  except an escalated arch finding, which waits for a person (see "Escalated
+  arch finding" below).
+- For the craft, arch and code-health passes the reviewer maps tags to the
+  verdict: `pass` when no `[blocker]` entry remains — the `[nit]` and
+  `[strength]` entries go in RECONCILIATION NOTES and on into the deviation
+  log; `needs-changes` or `fail` when at least one entry is `[blocker]`. The
+  prompt states this rule.
+- The orchestrator records the verdict the reviewer returned. It never
+  re-records a `needs-changes` as `pass` itself; a `needs-changes` with no
+  `[blocker]` entry is a reviewer slip, so re-run the pass.
 
 **Measurement tag (non-gating).** The craft/arch/code-health passes also
 self-classify each SPECIFIC ISSUES entry `[spec]` (an acceptance-criteria /
@@ -617,7 +621,8 @@ After all required passes pass:
 4. Address any reviewer findings, adding regression tests for any real
    bugs found.
 5. **Record each pass's verdict** as durable evidence with
-   `review.py record-review` (writes
+   `review.py record-review`, passing the reviewer's envelope as returned
+   (not a summary — a later arch round reads its `round:` line) (writes
    `docs/specs/NNN-<slug>/reviews/slice-NN-<pass>.md` — see the
    independent-review SKILL.md § "Recording and checking review
    evidence"). The `REVIEWED` transition is gated on this evidence, so it
@@ -636,6 +641,34 @@ the new verdict (it **overwrites in place** the earlier file for that
 `transition … REVIEWED`. With every required pass now `pass`, the gate
 clears. A non-`pass` artifact never overwritten by a later `pass` keeps
 blocking — the "superseded without a later pass" case (ADR-0014 §4).
+
+**Escalated arch finding — stop for a person (spec 122-01).** Some arch
+findings are decisions only a person can make: a path that duplicates
+existing work, effort past what the plan states, a slice tied to no goal
+line, a hard-to-reverse choice. The arch reviewer reports each as
+`VERDICT: fail` with a `[blocker]` entry whose description starts with
+`ESCALATE:` (`- [blocker][spec] <anchor> — ESCALATE: <decision> (options:
+A, B)`, where the anchor is a file:line or the spec line the decision rests
+on). Do **not** run the recovery above for it — do not fix it and do not
+re-run the pass:
+
+1. `record-review` the arch verdict exactly as the reviewer returned it. It
+   prints a `STOP` notice naming each escalated decision.
+2. Park each decision in the project inbox, with its options and the record's
+   path: `memory.py add-inbox "<spec> <slice> arch escalation: <decision>
+   (options: …) — see <docs>/specs/NNN-<slug>/reviews/slice-NN-arch.md"
+   <project-dir>`.
+3. Mark the slice blocked: set `blocked_by: arch escalation (see inbox)` in its
+   frontmatter and add a `**Blocked:**` line naming the decision
+   ([ADR-0057](../../docs/decisions/adr-0057-first-class-blockers-are-annotations.md)).
+4. Stop work on that slice. Other slices can continue; in an unattended run,
+   end the run for this slice here.
+
+Any non-escalated `[blocker]` entries in the same verdict wait with it. Once a
+person has decided and recorded the decision (an ADR, a lightweight decision,
+or a spec edit), clear `blocked_by:`, apply the decision, and re-run the arch
+pass. `check-reviews` and `transition … REVIEWED` keep refusing an escalated
+arch record with the same "a person must decide" message until then.
 
 **When a review retracts a *claim*, sweep the corpus before re-recording.**
 The recovery above is written for a code-shaped finding, which is local to one
