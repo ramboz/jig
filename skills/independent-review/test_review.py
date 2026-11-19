@@ -4600,6 +4600,7 @@ class OneBlockingRuleTests(unittest.TestCase):
             "`pass` when no `[blocker]` entry remains",
             "on into the deviation log",
             "records the verdict the reviewer returned",
+            "never re-records a `needs-changes` as `pass` itself",
         ):
             with self.subTest(clause=clause):
                 self.assertIn(clause, text)

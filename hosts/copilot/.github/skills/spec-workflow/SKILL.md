@@ -583,7 +583,9 @@ One rule, the one the gate enforces
 pass clears only when its recorded verdict is `pass`.
 
 - Any `fail` or `needs-changes` verdict, from any pass, blocks the
-  transition. The implementer addresses the findings and the pass is re-run.
+  transition. The implementer addresses the findings and the pass is re-run —
+  except an escalated arch finding, which waits for a person (see "Escalated
+  arch finding" below).
 - For the craft, arch and code-health passes the reviewer maps tags to the
   verdict: `pass` when no `[blocker]` entry remains — the `[nit]` and
   `[strength]` entries go in RECONCILIATION NOTES and on into the deviation
