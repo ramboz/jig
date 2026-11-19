@@ -200,8 +200,9 @@ reviewing the current deliverables, gives each earlier finding a status
 (resolved, still open, or withdrawn), and continues the round count. Every arch
 round ends `REASONING` with
 `round: N · open: <ids or none> · searched: <anchors or none>` — the record is
-overwritten in place, so that line is the only state the next round reads
-without git. Only the arch pass gets this, and only for its own record; the ban
+overwritten in place, so that line is the only history of rounds before the
+last that survives without git. Record the arch envelope as the reviewer
+returned it, or the line is lost and the count restarts. Only the arch pass gets this, and only for its own record; the ban
 on prior conversation and the implementer's reasoning stays.
 
 ### Frame-critique (adversarial pass — slice 064-03 / ADR-0020, on-demand)

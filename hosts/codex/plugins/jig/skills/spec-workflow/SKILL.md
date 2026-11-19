@@ -619,7 +619,8 @@ After all required passes pass:
 4. Address any reviewer findings, adding regression tests for any real
    bugs found.
 5. **Record each pass's verdict** as durable evidence with
-   `review.py record-review` (writes
+   `review.py record-review`, passing the reviewer's envelope as returned
+   (not a summary — a later arch round reads its `round:` line) (writes
    `docs/specs/NNN-<slug>/reviews/slice-NN-<pass>.md` — see the
    independent-review SKILL.md § "Recording and checking review
    evidence"). The `REVIEWED` transition is gated on this evidence, so it

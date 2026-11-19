@@ -4427,7 +4427,9 @@ class ArchRoundCarryOverTests(unittest.TestCase):
             self.assertIn(status, flat)
         self.assertIn("round: N · open: <ids> · searched: <anchors>", flat)
         # The ban on conversation context stays, with one named exception.
-        self.assertIn("implementer's reasoning", flat)
+        self.assertIn("Do not refer to any prior conversation about this "
+                      "task or to the implementer's reasoning. The one "
+                      "exception is the previous arch record", flat)
         self.assertNotIn("Do not refer to any prior reasoning or discussion "
                          "about this task.", flat)
         # Read after the review: the section follows "Evaluate".
@@ -4464,6 +4466,8 @@ class ArchRoundCarryOverTests(unittest.TestCase):
         self.assertIn(line, normalize_ws(self._arch()))
 
     def test_other_passes_unchanged_by_an_arch_record(self):
+        # bug-review is left out: it takes a bug record, not a slice, so a
+        # slice's arch record cannot reach it.
         summary = self.tmp / "health.txt"
         summary.write_text("clean\n")
         commands = (
@@ -4485,18 +4489,11 @@ class ArchRoundCarryOverTests(unittest.TestCase):
         before = build_all()
         self._write_record()
         after = build_all()
-        for cmd, _ in ((c[0], c) for c in commands):
+        for cmd, *_ in commands:
             with self.subTest(cmd=cmd):
+                self.assertEqual(before[cmd][0], 0, f"{cmd} failed to build")
                 self.assertEqual(before[cmd], after[cmd])
                 self.assertNotIn("## Previous round", after[cmd][1])
-
-    def test_round_prohibitions_differ_from_the_standard_block(self):
-        import importlib.util
-        spec = importlib.util.spec_from_file_location("review_mod", REVIEW)
-        module = importlib.util.module_from_spec(spec)
-        sys.path.insert(0, str(REVIEW.parent.parent))
-        spec.loader.exec_module(module)
-        self.assertNotEqual(module._ROUND_PROHIBITIONS, module._PROHIBITIONS)
 
 
 class ReviewerAgentRoundExceptionTests(unittest.TestCase):
@@ -4509,6 +4506,7 @@ class ReviewerAgentRoundExceptionTests(unittest.TestCase):
         self.assertIn("after you have reviewed the current deliverables",
                       text)
         self.assertIn("evidence on disk", text)
+
 
 if __name__ == "__main__":
     unittest.main()

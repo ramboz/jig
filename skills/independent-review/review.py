@@ -171,7 +171,8 @@ _ROUND_LINE_BLOCK = """\
 
 End `REASONING` with one line:
 `round: N · open: <ids or none> · searched: <anchors or none>`.
-`N` is this round's number (1 unless a previous record is named below).
+`N` is this round's number (1 unless a \"Previous round\" section names a
+previous record).
 An id is a short stable name for a finding — what is wrong and the path it
 anchors to, no line number — so a later round can match it."""
 
