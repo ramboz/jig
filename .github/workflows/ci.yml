@@ -7,7 +7,7 @@ on:
 
 jobs:
   test:
-    runs-on: ubuntu-latest
+    runs-on: ${{ matrix.os }}
     strategy:
       fail-fast: false
       matrix:
@@ -23,7 +23,14 @@ jobs:
         # We bracket the supported range — the 3.9 floor and the latest 3.x
         # (3.12) — rather than test every minor. 3.12 already exercises the
         # tomllib-gated (3.11+) code paths, so a middle 3.11 job is redundant.
-        python-version: ["3.9", "3.12"]
+        # `ubuntu-latest` moved to Ubuntu 26.04, for which setup-python ships no
+        # 3.9 build, so the floor job is pinned to ubuntu-24.04; the 3.12 job
+        # stays on ubuntu-latest.
+        include:
+          - python-version: "3.9"
+            os: ubuntu-24.04
+          - python-version: "3.12"
+            os: ubuntu-latest
     steps:
       - uses: actions/checkout@v7
         with:
