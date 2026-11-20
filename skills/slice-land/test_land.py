@@ -2994,6 +2994,13 @@ class Spec123CouldNotRunTests(unittest.TestCase):
         self.assertIn(".jig/test-command", section)
         self.assertIn("custom test command exited 2", section)
 
+    def test_blank_test_command_file_is_could_not_run_not_doc_only(self):
+        # `detect` skips a comment-only .jig/test-command, but the file is a
+        # declared runner: the land gate must not show the doc-only warning.
+        (self.proj / ".jig").mkdir()
+        (self.proj / ".jig" / "test-command").write_text("# sh test.sh\n")
+        self.assertEqual(_land.check_tests(self.proj), ("could_not_run", 2))
+
     def test_detail_is_cleared_by_a_later_check(self):
         self._custom_command(2)
         _land.check_tests(self.proj)

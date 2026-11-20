@@ -1,5 +1,5 @@
 ---
-status: READY_FOR_REVIEW
+status: IN_PROGRESS
 dependencies: []
 last_verified: 2026-11-20
 kind: feature
@@ -53,7 +53,8 @@ claimed_by: claude/xenodochial-tu-c3ef9e
 
 **Edge cases to cover explicitly:**
 - A command that exits 2 **and** prints a no-match line: exit 2 either way; the contract line is reported (the exit code is checked first).
-- A command killed by a signal (negative return code) is an environment error.
+- A command killed by a signal (negative return code) is an environment error. (A regression test whose honest red *is* a crash needs a wrapper that maps that crash to 1; the recipes document says so.)
+- A `.jig/test-command` that exists but is blank or all comments is skipped by `tdd.py detect` while `tdd.py run` exits 2 on it; `slice-land` treats the file's presence as a declared runner, so this is "could not run", not the doc-only warning.
 - The `REVIEWED` green check is a third read site and is **not** changed: any non-zero exit, including an environment error, still routes the bug back to `DIAGNOSING` and makes recorded verdicts stale. That is wrong for an environment error and is tracked as [bug 043](../../bugs/043-reviewed-gate-env-error-reopens-bug.md); it is bug-lifecycle behaviour (ADR-0016) pinned by a bug 021 test, so it gets its own diagnosis.
 - A project detected as pytest whose pytest module is missing (for example a unittest-only project with `test_*.py` files) moves from the doc-only warning to a land blocker. The row quotes `tdd.py`'s reason ("pytest module is not installed"); the ways out are installing pytest or a `.jig/test-command`.
 - Built-in runners that already exit 2 with a runner present (for example the pytest module missing) now block `slice-land` too; that is intended (spec D4).

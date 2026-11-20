@@ -1,5 +1,5 @@
 ---
-status: Proposed
+status: Accepted
 dependencies: []
 last_verified: 2026-11-20
 frame_review: true
@@ -9,7 +9,7 @@ frame_review: true
 
 ## Status
 
-Proposed (2026-11-20)
+Accepted (2026-11-20)
 
 ## Context
 
@@ -119,10 +119,12 @@ deaths as red, for backward compatibility.
 **Option B.**
 
 1. **No per-framework adapters.** The built-in runners are pytest, vitest,
-   jest and `node --test`, and the list is closed: pytest (through jig's own
-   `scripts/run_tests.py` custom command and the `tdd.py` subprocess test) is
-   the one jig dogfoods; the three JavaScript runners shipped before this
-   decision and stay as they are. A request to add a runner is answered with
+   jest and `node --test`, and the list is closed. They shipped before this
+   decision and stay as they are; only the pytest adapter is exercised
+   against the real tool in jig's suite (the `tdd.py` subprocess tests).
+   jig's own suite does not use a built-in at all: `scripts/run_tests.py` is
+   unittest-based and runs through `.jig/test-command`, so jig already
+   dogfoods the extension point. A request to add a runner is answered with
    the command contract, not with an adapter.
 2. **`.jig/test-command` is the extension point, with the same exit contract
    as `tdd.py run`:**
@@ -135,6 +137,12 @@ deaths as red, for backward compatibility.
      code and death by signal land in the same place. None of them is
      evidence of red.
    This applies to both the selector branch and the whole-suite branch.
+   Red stays at status 1, although 1 is also what a crashing script exits
+   with, because 1 is what test runners natively use for "a test failed"
+   (pytest, unittest, jest, vitest, `go test`, Gradle, Maven, jig's own
+   command). A red that a crash cannot produce (a dedicated status, or a
+   marker line in the output) would be safer and was not chosen: it would
+   make every existing direct runner command need a wrapper.
    The contract makes a sound command possible; it does not make every
    command sound. A command is only as good as its exit 1: a build tool that
    exits 1 for a compile failure (Gradle, Maven) needs a wrapper that checks
@@ -147,8 +155,8 @@ deaths as red, for backward compatibility.
    - `bug.py` `→ FIXING` already refuses an exit 2 ("not evidence of red").
    - `slice-land` (`land.py check_tests`) mapped every exit 2 to its
      non-blocking "no test runner detected (slice may be doc-only)" warning.
-     It now asks `tdd.py detect`, blocks when a runner exists but could not
-     run, and quotes `tdd.py`'s last line as the reason. Without that, this
+     It now asks `tdd.py detect`, blocks when a runner exists (or a
+     `.jig/test-command` file is present, even blank) but could not run, and quotes `tdd.py`'s last line as the reason. Without that, this
      decision would turn a failing `make test`, or a wrapper correctly
      reporting a broken build, from a land blocker into a soft warning.
    - `bug.py` `→ REVIEWED` treats any non-zero exit as a failed fix and
@@ -240,6 +248,10 @@ deaths as red, for backward compatibility.
   itself: if a bug record is found whose `red_confirmed_at` was stamped on a
   test that never ran through a custom command, revisit whether exit status
   alone is enough.
+
+Criteria 1 and 3 rest on signals jig cannot observe from inside (wrappers in
+other repositories, a silent false red). In practice the trip-wire is an
+issue report.
 
 ## Open questions
 

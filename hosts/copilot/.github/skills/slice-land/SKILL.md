@@ -137,11 +137,19 @@ python3 "$JIG_ROOT/skills/slice-land/land.py" execute \
 
 ### Test-check warnings
 
-If `tdd.py run` returns exit 2 (no test runner detected at the target),
-the readiness report marks the Tests row as a `[?]` warning rather
+If `tdd.py run` returns exit 2 **and no test runner is detected** at the
+target, the readiness report marks the Tests row as a `[?]` warning rather
 than a `[ ]` blocker. Rationale: some slices are doc-only and have no
 executable tests — those slices should still be landable. Exit 1 from
 `tdd.py run` (red tests) IS a blocker.
+
+Exit 2 with a runner present is different (spec 123-01 /
+[ADR-0068](../../docs/decisions/adr-0068-no-per-framework-runner-adapters.md)):
+the runner exists but could not run — a `.jig/test-command` that reported a
+build failure or a missing tool, the pytest module not installed, a runner
+binary missing. `land.py` asks `tdd.py detect` to tell the two apart and
+renders that case as `[ ] Tests: COULD NOT RUN`. It IS a blocker: a suite
+that could not run is no evidence of green.
 
 ### Close-out (post-DONE) subsection
 
@@ -283,8 +291,9 @@ python3 .../land.py prepare docs/specs/007-slice-land/spec.md "007-01" --mode di
   slice goes DONE. Once the slice is DONE, `slice-land` checks
   readiness and emits the landing recipe.
 - **`tdd-loop`** is the helper `slice-land` shells out to for the
-  test check. The test-check normalization (green / red / warn) maps
-  directly to `tdd.py run`'s exit code 0 / 1 / 2.
+  test check. The test-check normalization maps `tdd.py run`'s exit code
+  0 → green, 1 → red, and 2 → warn (no runner detected) or could-not-run
+  (a runner was detected; blocks).
 - **`adr-workflow`** is orthogonal — ADRs may or may not be written
   during reconciliation. `slice-land` doesn't gate on ADR presence.
 

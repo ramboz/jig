@@ -356,7 +356,10 @@ def check_tests(target: Path) -> tuple:
             [sys.executable, str(tdd_py), "detect", str(target)],
             capture_output=True, text=True,
         )
-        if detected.returncode == 0:
+        # A `.jig/test-command` file is a declared runner even when it is
+        # blank or all comments (`detect` skips it; `run` exits 2 on it).
+        declared = (target / ".jig" / "test-command").is_file()
+        if detected.returncode == 0 or declared:
             _could_not_run_detail = (
                 _last_line(result.stderr) or _last_line(result.stdout))
             return "could_not_run", 2

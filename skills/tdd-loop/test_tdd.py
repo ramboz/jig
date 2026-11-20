@@ -1029,15 +1029,22 @@ _STUB_GRADLEW = r"""#!/bin/sh
 # Stub gradlew: records its argv, optionally writes a JUnit XML report.
 printf '%s\n' "$@" > gradlew.args
 dir="${JIG_GRADLE_RESULTS:-build/test-results/test}"
+counts='tests="1" skipped="0" failures="0" errors="0"'
+body='<testcase name="a" classname="p.C"/>'
 case "${STUB_REPORT:-none}" in
-  pass)  body='<testcase name="a" classname="p.C"/>' ;;
-  fail)  body='<testcase name="a" classname="p.C"><failure message="x">boom</failure></testcase>' ;;
-  error) body='<testcase name="a" classname="p.C"><error message="x">boom</error></testcase>' ;;
-  empty) body='' ;;
+  pass)  ;;
+  noisy) out='<failure message="x"> <error> failures="3"'
+         body="$body<system-out><![CDATA[$out]]></system-out>" ;;
+  fail)  counts='tests="1" skipped="0" failures="1" errors="0"'
+         body='<testcase name="a" classname="p.C"><failure message="x">boom</failure></testcase>' ;;
+  error) counts='tests="1" skipped="0" failures="0" errors="1"'
+         body='<testcase name="a" classname="p.C"><error message="x">boom</error></testcase>' ;;
+  empty) counts='tests="0" skipped="0" failures="0" errors="0"'; body='' ;;
   none)  exit "${STUB_EXIT:-0}" ;;
 esac
 mkdir -p "$dir"
-printf '<testsuite name="p.C">%s<system-err></system-err></testsuite>\n' "$body" > "$dir/TEST-p.C.xml"
+printf '<?xml version="1.0"?>\n<testsuite name="p.C" %s time="0.1">\n%s\n</testsuite>\n' \
+  "$counts" "$body" > "$dir/TEST-p.C.xml"
 exit "${STUB_EXIT:-0}"
 """
 
@@ -1081,6 +1088,12 @@ class Spec123GradleRecipeTests(unittest.TestCase):
     def test_tests_pass_is_0(self):
         self.assertEqual(self._run(report="pass").returncode, 0)
 
+    def test_failure_text_in_captured_output_is_not_red(self):
+        # A passing test that PRINTS `<failure ...>` must stay green: the
+        # verdict comes from the <testsuite> header counts, not the body.
+        r = self._run(report="noisy")
+        self.assertEqual(r.returncode, 0, r.stderr)
+
     def test_failure_and_error_reports_are_1(self):
         for report in ("fail", "error"):
             with self.subTest(report=report):
@@ -1115,13 +1128,15 @@ class Spec123GradleRecipeTests(unittest.TestCase):
     def test_stale_failing_report_is_deleted_before_the_run(self):
         self.results.mkdir(parents=True)
         (self.results / "TEST-old.xml").write_text(
-            '<testsuite><testcase name="o"><failure/></testcase></testsuite>')
+            '<testsuite name="o" tests="1" failures="1" errors="0">'
+            '<testcase name="o"><failure/></testcase></testsuite>')
         # A passing run must not be turned red by the earlier report...
         self.assertEqual(self._run(report="pass").returncode, 0)
         self.assertFalse((self.results / "TEST-old.xml").exists())
         # ...and a run that writes nothing must not be vouched for by it.
         (self.results / "TEST-old.xml").write_text(
-            '<testsuite><testcase name="o"/></testsuite>')
+            '<testsuite name="o" tests="1" failures="0" errors="0">'
+            '<testcase name="o"/></testsuite>')
         self.assertEqual(self._run(report="none").returncode, 2)
 
     def test_missing_gradlew_is_2(self):

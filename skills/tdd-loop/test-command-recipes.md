@@ -1,8 +1,8 @@
 # Test-command recipes
 
 How to connect a test runner jig does not auto-detect, using
-`.jig/test-command`. Decision record:
-[ADR-0068](../../docs/decisions/adr-0068-no-per-framework-runner-adapters.md).
+`.jig/test-command`. Decision record: ADR-0068 in the jig repository
+(<https://github.com/ramboz/jig/blob/main/docs/decisions/adr-0068-no-per-framework-runner-adapters.md>).
 
 jig auto-detects four runners: pytest, vitest, jest and `node --test`. That
 list is closed. Every other stack (Gradle, Maven, Go, Rust, .NET, Ruby…)
@@ -46,6 +46,10 @@ command has to be honest:
 - A wrapper that crashes with status 1 (an uncaught exception in a Python or
   Node script, `set -e` in a shell script) makes the same false claim. Catch
   your own failures and exit 2.
+- A regression test for a crash (segfault, abort, out of memory) ends with a
+  signal or a status such as 134 or 139, which jig reads as "could not run".
+  If the crash is the failure you want witnessed, have the wrapper map that
+  specific outcome to 1.
 - If your runner's failing-test status is not 1 (`cargo test` exits 101, GNU
   `make` exits 2, some runners exit with the failure count), map that one
   status to 1 in a wrapper and let everything else through.
@@ -112,16 +116,19 @@ if [ -z "$reports" ]; then
   exit 2
 fi
 
-ran=$(find "$RESULTS" -type f -name 'TEST-*.xml' -exec grep -c '<testcase' {} + |
-      awk -F: '{ n += $NF } END { print n + 0 }')
+# Read the counts from each report's <testsuite ...> header, not from the
+# body: the body also holds the tests' captured output, which can contain
+# anything.
+headers=$(find "$RESULTS" -type f -name 'TEST-*.xml' \
+          -exec grep -h -o -E '<testsuite [^>]*>' {} +)
+ran=$(printf '%s\n' "$headers" | sed -n 's/.* tests="\([0-9][0-9]*\)".*/\1/p' |
+      awk '{ n += $1 } END { print n + 0 }')
 if [ "$ran" -eq 0 ]; then
-  echo "jig-gradle-test: the reports hold no test case: no test ran" >&2
+  echo "jig-gradle-test: the reports count no test: no test ran" >&2
   exit 2
 fi
 
-failed=$(find "$RESULTS" -type f -name 'TEST-*.xml' \
-         -exec grep -l -E '<(failure|error)[ >/]' {} +)
-if [ -n "$failed" ]; then
+if printf '%s\n' "$headers" | grep -q -E ' (failures|errors)="[1-9]'; then
   exit 1
 fi
 if [ "$status" -eq 0 ]; then
@@ -138,10 +145,12 @@ What it does:
   `--tests com.example.FooTest.rejectsEmptyInput`; `com.example.FooTest` runs
   the class. Use that form for a bug record's `regression_test:`.
 - **Red only on evidence.** It exits 1 only when a JUnit XML report written by
-  this run holds a `<failure>` or `<error>` element. Gradle's own exit status
-  is not trusted to mean "a test failed".
+  this run counts a failure or an error in its `<testsuite>` header
+  (`failures="…"` / `errors="…"`). Gradle's own exit status is not trusted to
+  mean "a test failed", and the report body is not searched, because it also
+  holds whatever the tests printed.
 - **Could not run → 2.** No report (compile failure, skipped task, no match),
-  reports with no test case, or a Gradle failure with no failing test.
+  reports that count no test, or a Gradle failure with no failing test.
 - **Environment.** `JAVA_HOME`, `ANDROID_HOME` and the rest are inherited from
   the environment `tdd.py` runs in; nothing is hard-coded.
 

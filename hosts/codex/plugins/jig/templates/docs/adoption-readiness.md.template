@@ -19,8 +19,10 @@ jig works best when these hold. Treat it as a post-scaffold sanity check:
 - [ ] **Python 3 available** — `python3 --version` works (every jig helper
       and hook is Python 3).
 - [ ] **Test command** — you know your stack's test command (pytest /
-      vitest / jest are auto-detected; override via a `.jig/test-command`
-      file), or you accept there isn't one yet.
+      vitest / jest / `node --test` are auto-detected; any other stack puts
+      its command in a `.jig/test-command` file: exit 0 = tests passed, 1 = a
+      test failed, anything else = could not run), or you accept there isn't
+      one yet.
 - [ ] **Specs/ADRs in-repo** — you'll keep `docs/specs/` and
       `docs/decisions/` under version control as the source of truth for
       "done."
