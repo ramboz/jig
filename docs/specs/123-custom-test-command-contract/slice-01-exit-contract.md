@@ -1,5 +1,5 @@
 ---
-status: DRAFT
+status: READY_FOR_REVIEW
 dependencies: []
 last_verified: 2026-11-20
 kind: feature
@@ -12,6 +12,7 @@ kind: feature
 #                      # then wire a servo `design-eval` as the done-condition
 #                      # (attest-only at REVIEWED; ADR-0014, ADR-0022,
 #                      # ADR-0049).
+claimed_by: claude/xenodochial-tu-c3ef9e
 ---
 
 <!-- jig self-defining vocabulary (soft, forward-only): expand each acronym on
@@ -25,30 +26,35 @@ kind: feature
 
 ## Slice 123-01 — exit-contract
 
-**Goal:** a custom test command (`.jig/test-command`) that exits 2 is reported by `tdd.py run` as an environment error (exit 2), not as a red test, so a project wrapper can refuse to vouch for a run and the bug-fix `FIXING` gate cannot accept a test that never executed.
+**Goal:** for a custom test command (`.jig/test-command`), only exit 1 is read as a failing test; every other non-zero exit is reported by `tdd.py run` as an environment error (exit 2). A project wrapper can then refuse to vouch for a run, and neither the bug-fix `FIXING` gate nor `slice-land` treats "could not run" as a result.
 
-**Decision:** [ADR-0068](../../decisions/adr-0068-no-per-framework-runner-adapters.md) §2.
+**Decision:** [ADR-0068](../../decisions/adr-0068-no-per-framework-runner-adapters.md) §2; spec 123 D1 and D4.
 
 **DoR:**
-- ✅ ADR-0068 drafted with the 0/1/2 contract and the backward-compatibility consequence.
+- ✅ ADR-0068 drafted with the contract and the backward-compatibility consequence.
 - ✅ `cmd_run`'s two custom branches read (`skills/tdd-loop/tdd.py`, `return 0 if returncode == 0 else 1` in both).
 - ✅ `bug.py`'s `FIXING` gate already refuses a `tdd.py` exit 2 with "not evidence of red" and quotes the last stderr line (`_tdd_failure_detail`).
+- ✅ `tdd.py`'s other consumer read: `skills/slice-land/land.py` `check_tests` runs `tdd.py run <target>` (whole suite) and maps exit 2 to the non-blocking `warn`; only `red` blocks (`has_blocker`). Found by this slice's frame critique.
 
 **Assumptions:** None beyond the spec's.
 
 **Acceptance Criteria:**
 
-1. **Selector branch.** With a `.jig/test-command` that contains `{test}` and whose command exits 2, `tdd.py run <target> --test <selector>` exits 2.
-2. **Whole-suite branch.** With a custom command that exits 2, `tdd.py run <target>` (no selector) exits 2.
-3. **The message names the contract.** In both branches the last stderr line is a single line that says the command exited 2, names `.jig/test-command`, states the three codes, and says how to fix a command that uses 2 for failing tests (wrap it to exit 1).
-4. **0 and 1 are unchanged; other non-zero codes stay red.** Exit 0 → 0 and exit 1 → 1 in both branches; exits 3 and 101 → 1 in both branches.
-5. **Earlier refusals are unchanged.** A selector against a command with no `{test}` token still exits 2 with the bug 021 message; a non-zero exit with a recognized no-match line still exits 2 with `unresolved selector`.
-6. **The bug-fix gate does not accept it.** `bug.py transition <id> FIXING` on a project whose custom command exits 2 fails with the "not evidence of red" error, the error quotes the `tdd.py` contract line, the record's status stays `ROOT_CAUSED`, and `red_confirmed_at` is not stamped. This runs the real `tdd.py`, not a stub helper.
-7. **The contract is documented** in `skills/tdd-loop/SKILL.md` (the custom-command gotcha and the exit-code list).
+1. **Selector branch.** With a `.jig/test-command` that contains `{test}`, `tdd.py run <target> --test <selector>` exits 2 when the command exits 2, 3, 101 or 127.
+2. **Whole-suite branch.** The same statuses give exit 2 from `tdd.py run <target>` (no selector).
+3. **The message names the contract.** In both branches the last stderr line is a single line of at most 300 characters that names the status the command exited with, names `.jig/test-command`, says it is an environment error and not a failing test, and says that exit 1 must mean a test ran and failed. It does not advise a blanket `|| exit 1`.
+4. **0 and 1 are unchanged.** Exit 0 → 0 and exit 1 → 1 in both branches.
+5. **Earlier refusals are unchanged.** A selector against a command with no `{test}` token still exits 2 with the bug 021 message; an exit 1 with a recognized no-match line still exits 2 with `unresolved selector`.
+6. **The bug-fix gate does not accept it.** `bug.py transition <id> FIXING` on a project whose custom command exits 2 fails with the "not evidence of red" error, the error quotes the `tdd.py` contract line, the record's status stays `ROOT_CAUSED`, and `red_confirmed_at` is not stamped. A custom command that exits 1 still enters `FIXING`. Both run the real `tdd.py`, not a stub helper.
+7. **`slice-land` blocks on "could not run".** `land.py check_tests` returns a status distinct from `warn`, `red` and `not_run` when `tdd.py run` exits 2 **and** `tdd.py detect` finds a runner. The readiness report renders it as tests that could not be run and not as a pass, without the doc-only wording, and it is a blocker (the verdict is not GO). Checked against the real `tdd.py` with a custom command that exits 2.
+8. **The doc-only warning is unchanged where it is true.** With no runner detected, `check_tests` still returns `warn`, the row keeps its wording, and it does not block.
+9. **The contract is documented** in `skills/tdd-loop/SKILL.md` (the custom-command gotcha and the exit-code list) and the land gate's new row in `skills/slice-land/SKILL.md`.
 
 **Edge cases to cover explicitly:**
 - A command that exits 2 **and** prints a no-match line: exit 2 either way; the contract line is reported (the exit code is checked first).
-- The `REVIEWED` green check on exit 2 behaves as before (any non-zero routes the bug back to `DIAGNOSING`); this slice does not change it.
+- A command killed by a signal (negative return code) is an environment error.
+- The `REVIEWED` green check on a non-zero exit behaves as before (any non-zero routes the bug back to `DIAGNOSING`); this slice does not change it.
+- Built-in runners that already exit 2 with a runner present (for example the pytest module missing) now block `slice-land` too; that is intended (spec D4).
 
 **DoD:**
 - [ ] All ACs pass; full test suite green (no regressions).
@@ -86,7 +92,7 @@ from the count.
       the entry. If this slice introduces a new skill, add or
       update its row in the Skills table.
 
-**Anti-horizontal-phasing check:** after this slice a project's wrapper script can exit 2 and the `FIXING` gate refuses to treat the run as a failing test.
+**Anti-horizontal-phasing check:** after this slice a project's wrapper script can exit 2, the `FIXING` gate refuses to treat the run as a failing test, and `slice-land` refuses to land on it.
 
 ### Deviation log (after reconciliation)
 

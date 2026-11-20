@@ -1,5 +1,5 @@
 ---
-status: DRAFT
+status: READY_FOR_REVIEW
 dependencies: [123-01]
 last_verified: 2026-11-20
 kind: feature
@@ -12,6 +12,7 @@ kind: feature
 #                      # then wire a servo `design-eval` as the done-condition
 #                      # (attest-only at REVIEWED; ADR-0014, ADR-0022,
 #                      # ADR-0049).
+claimed_by: claude/xenodochial-tu-c3ef9e
 ---
 
 <!-- jig self-defining vocabulary (soft, forward-only): expand each acronym on
@@ -37,12 +38,12 @@ kind: feature
 
 **Acceptance Criteria:**
 
-1. **`detect` names the way out.** With no runner, `tdd.py detect` exits 2; the first stderr line is still `no test runner detected at <target>`; the last stderr line is a single line of at most 300 characters (the length `bug.py` quotes untruncated) naming `.jig/test-command`, the `{test}` placeholder, and the meaning of exit 0, 1 and 2.
+1. **`detect` names the way out.** With no runner, `tdd.py detect` exits 2; the first stderr line is still `no test runner detected at <target>`; the last stderr line is a single line of at most 300 characters (the length `bug.py` quotes untruncated) naming `.jig/test-command`, the `{test}` placeholder, and the exit contract: 0 passed, 1 a test ran and failed, anything else could not run.
 2. **`run` does the same**, with and without `--test`.
 3. **The bug-fix gate carries it.** `bug.py transition <id> FIXING` on a project with no runner fails with an error that names `.jig/test-command`, `{test}` and the three exit codes. Runs the real `tdd.py`.
 4. **`SKILL.md` states the policy.** `skills/tdd-loop/SKILL.md` says the built-in runner list is closed (pytest, vitest, jest, `node --test`), that every other stack uses the command contract, links ADR-0068 and the recipes document, and no longer lists rspec / `go test` / `cargo test` detection as merely deferred.
-5. **A recipes document ships with the skill.** `skills/tdd-loop/test-command-recipes.md` states the contract and gives one worked example: a Gradle JVM-unit-test wrapper script that lives in the consuming project, maps a selector to `--tests`, and exits 2 when the build failed or no test ran, decided from the JUnit XML reports. It says Android instrumented tests are out of scope for jig and are the project's to wire through the same contract, and that jig does not ship or run the wrapper.
-6. **The recipe's script is exercised.** A test extracts the wrapper from the document and runs it against a stub `gradlew`: tests pass → 0; a report with a failure → 1; `gradlew` fails and writes no report → 2; `gradlew` fails with reports that hold no failure → 2; `gradlew` succeeds but no test case ran → 2; a selector `pkg.Class::method` reaches `gradlew` as `--tests pkg.Class.method`; a stale report from an earlier run is not read.
+5. **A recipes document ships with the skill.** `skills/tdd-loop/test-command-recipes.md` states the contract, says a bare build-tool command that exits 1 on a compile failure is not sound, and gives one worked example: a Gradle JVM-unit-test wrapper script that lives in the consuming project. The wrapper maps a selector to `--tests`, exits 1 only when a JUnit XML report from this run holds a failure, and exits 2 when the build failed or no test ran. It says: the script has not been run against real Gradle by jig; the Gradle task and the report location are settings the project must check (an Android module's task is per variant, for example `:app:testDebugUnitTest`, and in a multi-module build the task must name the module); Android instrumented tests are out of scope for jig and are the project's to wire through the same contract; jig does not ship or run the wrapper; the document is one example, not a catalogue.
+6. **The recipe's script is exercised against a stub `gradlew`** (a test extracts the wrapper from the document). The staleness mechanism is fixed: the wrapper deletes the task's existing report files before it calls Gradle, which both keeps an earlier run's reports out of the verdict and makes Gradle's up-to-date check re-run the test task. Cases: tests pass → 0; a report with a failure → 1; `gradlew` fails and writes no report → 2; `gradlew` fails with reports that hold no failure → 2; `gradlew` exits 0 and writes no report (the task was skipped or filtered to nothing) → 2; `gradlew` exits 0 with a report holding no test case → 2; a selector `pkg.Class::method` reaches `gradlew` as `--tests pkg.Class.method`; a failing report left by an earlier run is deleted before the run and does not turn a passing run red; `gradlew` missing → 2.
 7. **Other live docs agree.** `docs/product-vision.md`'s out-of-scope line, `docs/adoption-readiness.md` and its scaffold template describe the closed list and the command contract; `docs/refinement-todo.md` records a generic JUnit-XML reader as a demand-gated option.
 8. **Host packages are regenerated** and `scripts/build_host_packages.py --check` is clean.
 
@@ -86,7 +87,7 @@ from the count.
       the entry. If this slice introduces a new skill, add or
       update its row in the Skills table.
 
-**Anti-horizontal-phasing check:** after this slice a Gradle user who runs `tdd.py detect` reads what file to create and what its command must return, and finds a wrapper to start from.
+**Anti-horizontal-phasing check:** after this slice a Gradle user who runs `tdd.py detect` reads what file to create and what its command must return, and finds a wrapper to adapt (task name and report location are theirs to set and verify).
 
 ### Deviation log (after reconciliation)
 

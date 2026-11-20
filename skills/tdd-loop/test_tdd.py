@@ -852,5 +852,86 @@ class Bug021CustomCommandSelectorContractTests(unittest.TestCase):
         self.assertEqual(r.returncode, 1, r.stdout + r.stderr)
 
 
+# ------------- Spec 123-01 — custom-command exit contract (ADR-0068) -------------
+
+
+class Spec123CustomCommandExitContractTests(unittest.TestCase):
+    """ADR-0068 §2: a custom .jig/test-command follows tdd.py's own contract —
+    0 green, 1 red, 2 "could not run" (environment error, never red); any
+    other non-zero status stays red."""
+
+    def setUp(self):
+        self.tmp = tempfile.TemporaryDirectory()
+        self.target = Path(self.tmp.name)
+        (self.target / "exiter.py").write_text(
+            "import sys\n"
+            "print('ran', sys.argv[2:])\n"
+            "if len(sys.argv) > 3 and sys.argv[3] == 'nomatch':\n"
+            "    print('no matching tests')\n"
+            "raise SystemExit(int(sys.argv[1]))\n"
+        )
+
+    def tearDown(self):
+        self.tmp.cleanup()
+
+    def _run(self, code: int, *, selector: bool, extra: str = ""):
+        _write(self.target / ".jig" / "test-command",
+               f"{shlex.quote(sys.executable)} exiter.py {code} {{test}} {extra}\n")
+        args = ["run", str(self.target)]
+        if selector:
+            args += ["--test", "pkg/test_x.py::Case"]
+        return run_tdd(*args)
+
+    def _last_stderr_line(self, r) -> str:
+        return [ln for ln in r.stderr.splitlines() if ln.strip()][-1]
+
+    def test_exit_2_is_environment_error_in_both_branches(self):
+        # AC1 (selector branch) + AC2 (whole-suite branch).
+        for selector in (True, False):
+            with self.subTest(selector=selector):
+                r = self._run(2, selector=selector)
+                self.assertEqual(r.returncode, 2, r.stdout + r.stderr)
+
+    def test_exit_2_message_names_the_contract_on_the_last_line(self):
+        # AC3: one last stderr line — bug.py quotes exactly that line.
+        for selector in (True, False):
+            with self.subTest(selector=selector):
+                line = self._last_stderr_line(self._run(2, selector=selector))
+                self.assertIn("exited 2", line)
+                self.assertIn(".jig/test-command", line)
+                self.assertIn("environment error", line)
+                for code in ("0", "1", "2"):
+                    self.assertRegex(line, rf"\b{code} ")
+                self.assertIn("exit 1", line)  # the wrap-it fix
+                self.assertLessEqual(len(line), 300)
+
+    def test_zero_and_one_unchanged_and_other_nonzero_stays_red(self):
+        # AC4.
+        for selector in (True, False):
+            for code, want in ((0, 0), (1, 1), (3, 1), (101, 1)):
+                with self.subTest(selector=selector, code=code):
+                    r = self._run(code, selector=selector)
+                    self.assertEqual(r.returncode, want, r.stdout + r.stderr)
+
+    def test_no_match_line_with_exit_1_is_still_unresolved_selector(self):
+        # AC5: the bug 021 no-match mapping is unchanged.
+        r = self._run(1, selector=True, extra="nomatch")
+        self.assertEqual(r.returncode, 2, r.stdout + r.stderr)
+        self.assertIn("unresolved selector", r.stderr)
+
+    def test_exit_2_with_no_match_line_reports_the_contract_line(self):
+        # Edge case: the exit code is checked first.
+        r = self._run(2, selector=True, extra="nomatch")
+        self.assertEqual(r.returncode, 2, r.stdout + r.stderr)
+        self.assertIn("exited 2", self._last_stderr_line(r))
+
+    def test_skill_md_documents_the_contract(self):
+        # AC7.
+        text = SKILL_MD.read_text()
+        self.assertIn("ADR-0068", text)
+        self.assertRegex(text, r"exits? `?2`?")
+        self.assertIn("could not run", text)
+
+
 if __name__ == "__main__":
     unittest.main()
