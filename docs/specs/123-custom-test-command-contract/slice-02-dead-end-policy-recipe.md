@@ -1,7 +1,8 @@
 ---
 status: DRAFT
-dependencies: []
-last_verified:
+dependencies: [123-01]
+last_verified: 2026-11-20
+kind: feature
 # arch_review: true  # set to true when this slice changes module
 #                    # boundaries, public contracts, or architecture-
 #                    # shaped concerns (triggers arch-review pass).
@@ -22,61 +23,32 @@ last_verified:
      else mark them as assumptions in the spec's `## Assumptions` section —
      never assert an unverified claim as fact. -->
 
-## Slice 123-01 — tbd
+## Slice 123-02 — dead-end-policy-recipe
 
-**Goal:** _TODO: one-sentence statement of what this slice delivers.
-End-to-end value in a single vertical slice (anti-horizontal-phasing
-check below)._
+**Goal:** a user whose project has no built-in runner is told what to do by the tool itself, the docs state that jig adds no per-framework adapters, and a Gradle project has one worked wrapper to copy.
+
+**Decision:** [ADR-0068](../../decisions/adr-0068-no-per-framework-runner-adapters.md) §1, §3, §4.
 
 **DoR:**
-- ✅ _TODO: list the prerequisites that must hold before this slice
-  becomes `READY_FOR_IMPLEMENTATION` — upstream slices done, helpers
-  in place, fixtures/data available, etc._
+- ✅ Slice 123-01 fixes the contract this slice's messages and recipe describe.
+- ✅ Skill directories ship whole in the host packages except `test_*.py` (`scripts/build_codex_plugin.py`; existing `worked-example-*.md` siblings ship today), so a document beside `SKILL.md` reaches consumers.
+
+**Assumptions:** None beyond the spec's.
 
 **Acceptance Criteria:**
 
-1. **_TODO: first AC._** Sharp, testable, observable from outside the
-   helper (CLI output, file mutation, exit code, log line). Avoid
-   "code is clean" / "tests pass" framings — those belong in the DoD.
-2. _TODO: second AC._
-3. _TODO: third AC._
+1. **`detect` names the way out.** With no runner, `tdd.py detect` exits 2; the first stderr line is still `no test runner detected at <target>`; the last stderr line is a single line of at most 300 characters (the length `bug.py` quotes untruncated) naming `.jig/test-command`, the `{test}` placeholder, and the meaning of exit 0, 1 and 2.
+2. **`run` does the same**, with and without `--test`.
+3. **The bug-fix gate carries it.** `bug.py transition <id> FIXING` on a project with no runner fails with an error that names `.jig/test-command`, `{test}` and the three exit codes. Runs the real `tdd.py`.
+4. **`SKILL.md` states the policy.** `skills/tdd-loop/SKILL.md` says the built-in runner list is closed (pytest, vitest, jest, `node --test`), that every other stack uses the command contract, links ADR-0068 and the recipes document, and no longer lists rspec / `go test` / `cargo test` detection as merely deferred.
+5. **A recipes document ships with the skill.** `skills/tdd-loop/test-command-recipes.md` states the contract and gives one worked example: a Gradle JVM-unit-test wrapper script that lives in the consuming project, maps a selector to `--tests`, and exits 2 when the build failed or no test ran, decided from the JUnit XML reports. It says Android instrumented tests are out of scope for jig and are the project's to wire through the same contract, and that jig does not ship or run the wrapper.
+6. **The recipe's script is exercised.** A test extracts the wrapper from the document and runs it against a stub `gradlew`: tests pass → 0; a report with a failure → 1; `gradlew` fails and writes no report → 2; `gradlew` fails with reports that hold no failure → 2; `gradlew` succeeds but no test case ran → 2; a selector `pkg.Class::method` reaches `gradlew` as `--tests pkg.Class.method`; a stale report from an earlier run is not read.
+7. **Other live docs agree.** `docs/product-vision.md`'s out-of-scope line, `docs/adoption-readiness.md` and its scaffold template describe the closed list and the command contract; `docs/refinement-todo.md` records a generic JUnit-XML reader as a demand-gated option.
+8. **Host packages are regenerated** and `scripts/build_host_packages.py --check` is clean.
 
-### Behavioral rules (optional)
-
-For stateful or role-dependent behavior, make the implicit outcomes checkable.
-Omit this section when it adds no value, or link an existing contract instead of
-restating it. Rule IDs do not encode precedence: surface conflicting rules/ACs
-for explicit resolution. A demo does not override the owning ACs. When using an
-external reference, name its authority and revision.
-
-| Rule | Operation/control | Actor | State/precondition | Outcome | Rationale | AC |
-|------|-------------------|-------|--------------------|---------|-----------|----|
-| BR-1 | _TODO_ | _TODO_ | _TODO_ | _Allowed/blocked/hidden or concrete response_ | _Why_ | _Owning AC_ |
-
-### Verification scenario (optional)
-
-Use when a runtime journey helps verify the ACs; omit when existing tests already
-give adequate evidence. Reuse existing test/browser/service tools, not a new
-runner. CLI, service, and UI scenarios use the same evidence shape.
-
-**Preconditions:** _Environment, fixtures, access, and safe test accounts; no secrets._
-
-**Invocation:** _Reproducible command or tool steps._
-
-**Preserved behavior:** _Existing journeys or negative paths that must not regress._
-
-**Code revision / dirty-change identity:** _Revision tested; identify any uncommitted
-changes, for example with a saved diff and its digest. Evidence references are
-durable paths, not ephemeral chat claims._
-
-| Step | AC | Expected | Observed | Outcome | Evidence |
-|------|----|----------|----------|---------|----------|
-| 1 | _AC_ | _Observable result_ | _Actual observation after execution_ | _not-run_ | _Log/assertion/screenshot reference_ |
-
-Outcomes: `pass`, `fail`, `not-run`, or `environment-error`. Not-run or an
-environment-error is not a pass. If a required AC needs runtime verification,
-missing evidence leaves it unverified; do not declare completion from a build,
-a proposed script, or an unavailable environment.
+**Edge cases to cover explicitly:**
+- The dead-end line must stay one line: `bug.py` quotes only the last stderr line.
+- The recipe test needs only `sh`; it is skipped where `sh` is absent.
 
 **DoD:**
 - [ ] All ACs pass; full test suite green (no regressions).
@@ -93,36 +65,6 @@ a proposed script, or an unavailable environment.
 - [ ] Reconciliation review passed.
 - [ ] `docs/refinement-todo.md` updated if any decisions were
       deferred during implementation.
-
-### For `kind: spike` slices
-
-When the slice's frontmatter has `kind: spike`, the body carries four
-extra labelled blocks alongside the standard Goal / DoR / AC / DoD
-scaffolding. Spike slices are timeboxed investigation, not feature
-work — they reduce an unknown before committing to a design.
-
-```markdown
-**Question:** _One sentence stating the open question. Set at DRAFT._
-
-**Time-box:** _Explicit budget — e.g., "1 day", "4 hours". Set at DRAFT._
-
-**Findings:** _Bullet evidence collected during the spike. Filled
-during IN_PROGRESS._
-
-**Outcome:** _One of: `ADR-NNNN created` / `spec NNN-NN unblocked` /
-`abandoned (reason)`. Multiple outcomes separated by `;`
-(e.g., `ADR-0007 created; spec 030-02 unblocked`). Set at DONE._
-```
-
-`spec_lint.py` validates the `kind:` enum (allowed values: `spike`,
-`feature`) and soft-warns when a `kind: spike` slice is missing any of
-the four labels. Mid-flight spikes legitimately have empty Findings /
-Outcome, so this is a warning, not a hard error.
-
-See `skills/spec-workflow/SKILL.md` (Spike slices subsection) and
-`docs/spec-workflow/spidr-primer.md` for the always-nested rule (spike
-slices live inside a real spec, never as standalone `docs/spikes/`
-artifacts) and the abandoned-outcome manual-reshape failure mode.
 
 ### Close-out (post-DONE)
 
@@ -144,10 +86,7 @@ from the count.
       the entry. If this slice introduces a new skill, add or
       update its row in the Skills table.
 
-**Anti-horizontal-phasing check:** _TODO: in one sentence, describe
-the end-to-end observable value a user gets after this slice lands.
-If the answer is "intermediate state for the next slice," the slice
-is mis-shaped — re-split._
+**Anti-horizontal-phasing check:** after this slice a Gradle user who runs `tdd.py detect` reads what file to create and what its command must return, and finds a wrapper to start from.
 
 ### Deviation log (after reconciliation)
 
