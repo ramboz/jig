@@ -360,8 +360,9 @@ See the [runnable CLI example](../skills/spec-workflow/worked-example-behavioral
 
 ## Post-implementation review
 
-Every slice goes through up to four review passes between IN_PROGRESS
-and REVIEWED — two always-on, two gated on slice frontmatter flags.
+Every slice goes through a batch of review passes between IN_PROGRESS
+and REVIEWED — two always-on, the rest gated on slice frontmatter flags.
+One of the gated passes, owner-review, is answered by a person.
 
 1. **Compliance pass — `jig:independent-review`** (always). A reviewer
    subagent with a fresh, self-contained prompt and read-only tools
@@ -401,10 +402,29 @@ and REVIEWED — two always-on, two gated on slice frontmatter flags.
    fixable? are the lint findings worth blocking on? Same `[blocker]`/`[nit]`
    block rule as the craft pass. It is gated rather than always-on because the
    per-slice review carries a real context cost; it defaults off.
+5. **Owner-review pass** (on-demand, **gated** by `owner_review: true`;
+   spec 124 / [ADR-0069](decisions/adr-0069-owner-review-human-attested-evidence.md)).
+   The owner tries the slice on a real device or in the real UI. There is
+   no reviewer subagent: `review.py owner-review <spec> <slice>` prints
+   what to ask, the agent asks the owner and waits, and the owner's answer
+   is recorded word for word with what they tried and on what surface. The
+   agent must never infer this verdict — silence, an earlier approval and
+   the agent's own run of the feature are not answers, and with no person
+   to ask nothing is recorded.
 
 Order: compliance → craft → (arch if `arch_review: true`) → (code-health
-if `code_health_review: true`). All required passes must `pass` for the
-IN_PROGRESS → REVIEWED transition.
+if `code_health_review: true`). The owner-review question goes out first,
+straight after implementation, and the owner tries the slice in parallel
+with the automated passes (`workflow.py session-plan` lists it that way).
+All required passes must `pass` for the IN_PROGRESS → REVIEWED transition.
+
+**Where the owner's hands-on check belongs.** When the owner wants to try
+a slice before accepting it, set `owner_review: true` so the check is part
+of the review batch, before reconciliation — not in the DoD after
+`RECONCILED`. A DoD line is only enforced at `DONE`, after the deviation
+log, the reconciliation sweep and any decision records have been written,
+so a rejection there means redoing all of them. "Owner check last" means
+after implementation, never after reconciliation.
 
 The reviewer's isolation is prompt- and tool-scoped — a self-contained
 prompt plus read-only tools — not a hard sandbox (parent context is
@@ -419,7 +439,7 @@ Each pass produces a **durable verdict artifact**, not ephemeral chat.
 After a pass returns, record its verdict with `review.py record-review`,
 which writes `docs/specs/NNN-slug/reviews/slice-NN-<pass>.md`
 (`<pass>` ∈ `compliance` / `craft` / `arch` / `code-health` /
-`reconciliation`; the schema lives in
+`owner-review` / `reconciliation`; the schema lives in
 `skills/_common/review_evidence.py`). The end-to-end enforced path is:
 
 1. **Build the prompt** — `review.py implementation|pr-review|arch-review`
@@ -438,6 +458,15 @@ which writes `docs/specs/NNN-slug/reviews/slice-NN-<pass>.md`
    refusal names the missing/invalid artifact and the `record-review`
    command to produce it. (`review.py check-reviews … --stage REVIEWED`
    runs the same check ahead of the transition.)
+
+The `owner-review` pass is recorded with the same command but takes the
+owner's answer instead of a reviewer envelope: `--tried`, `--surface` and
+`--owner-quote` are required, and `--summary-file` is optional notes. The
+gate requires it when the slice declares `owner_review: true` and
+re-checks that the record carries all three parts. An agent can write this
+file, so it is a deliberateness signal, not proof that a person tried
+anything: its job is to put the owner's quoted answer where the owner can
+read it and contradict it.
 
 The gate enforces **evidence consistency**, not human sign-off — it lives
 inside the agent's trust boundary, so it is a *deliberateness* mechanism, not
@@ -470,6 +499,19 @@ non-`pass` verdict). To recover:
    `pass`, the gate clears. A non-`pass` artifact that was never overwritten
    by a later `pass` keeps blocking — that is exactly the "superseded
    without a later pass" case the gate is meant to catch.
+
+**When the owner asks for changes.** A non-`pass` owner verdict blocks
+`REVIEWED`, so the slice stays `IN_PROGRESS` and no reconciliation
+document exists yet. Make the changes, re-run the automated passes, then
+ask the owner again and record their new answer. On an
+`owner_review: true` slice the passes are treated as one batch: recording
+a non-`pass` verdict for *any* `REVIEWED`-stage pass stamps
+`review_reopened_at` on the slice, and every verdict recorded before the
+stamp stops clearing — the owner's included, because the fix changes the
+build they tried. Tell the owner what changed when you ask again; they may
+say they do not need to try it again, and that answer is recorded in their
+words. The same rule holds when no verdict failed: if what the owner tried
+changes after their answer, ask again.
 
 The exception is an **escalated arch finding**: an arch verdict whose
 `[blocker]` entry starts with `ESCALATE:` is a decision only a person can
@@ -529,7 +571,7 @@ After implementation, before marking DONE:
   corrections in amendments.
 - `transition … DONE` re-validates the post-implementation set —
   `compliance` + `craft` (+ any REVIEWED-stage gated passes such as `arch`,
-  `code-health`, or `design-review`) + `reconciliation` — plus the deviation log and
+  `code-health`, `design-review`, or `owner-review`) + `reconciliation` — plus the deviation log and
   reconciliation sweep, on top of the existing `dependencies:` check, so a
   hand-edited status can't walk past a gate an earlier transition enforced.
 

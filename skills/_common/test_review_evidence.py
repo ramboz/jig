@@ -111,7 +111,9 @@ class VocabularyTests(unittest.TestCase):
         self.assertEqual(
             set(ev.PASSES),
             {"compliance", "craft", "arch", "code-health", "reconciliation",
-             "frame-critique", "design-review", "bug-review", "security"},
+             "frame-critique", "design-review", "bug-review", "security",
+             # spec 124-01 / ADR-0069: the human-answered owner pass.
+             "owner-review"},
         )
 
     def test_verdict_vocabulary(self):

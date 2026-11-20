@@ -1,9 +1,10 @@
 ---
-status: DRAFT
+status: IN_PROGRESS
 dependencies: [adr-0069]
 last_verified:
 kind: feature
 arch_review: true
+claimed_by: claude/elegant-chaplygin-fa1375
 ---
 
 <!-- jig self-defining vocabulary (soft, forward-only): expand each acronym on
@@ -60,18 +61,28 @@ any reconciliation document is written.
    and after the fix the owner is asked again and the automated passes are
    re-run. `record-review` prints the same notice when it records a
    non-`pass` owner verdict.
-7. **`workflow.py session-plan` shows the pass as waiting on the owner.**
+7. **Any rejection reopens the batch on a flagged slice.** On an
+   `owner_review: true` slice, `record-review` with a non-`pass` verdict
+   for any `REVIEWED`-stage pass (`compliance`, `craft`, `arch`,
+   `code-health`, `design-review`, `owner-review`) stamps
+   `review_reopened_at` in the slice frontmatter and says so, naming the
+   passes to re-run and that the owner must be asked again. An owner
+   `pass` recorded before that stamp no longer clears `REVIEWED`. A `pass`
+   verdict, a `reconciliation` verdict, and any verdict on an unflagged
+   slice stamp nothing.
+8. **`workflow.py session-plan` shows the pass as waiting on the owner.**
    For a flagged slice the plan lists `owner-review` directly after
    `implement` and before `compliance`, marked as a question for the owner
    that runs in parallel with the automated passes. An unflagged slice's
    plan is unchanged.
-8. **The docs put the owner's check in the review batch.**
+9. **The docs put the owner's check in the review batch.**
    `docs/workflow.md` (post-implementation review, recording, recovering)
    and `skills/spec-workflow/SKILL.md` and
    `skills/independent-review/SKILL.md` describe the pass, state that an
    owner check belongs with the review batch before reconciliation and not
-   in the DoD after `RECONCILED`, and state that the record is a
-   deliberateness signal, not proof.
+   in the DoD after `RECONCILED`, state that the record is a
+   deliberateness signal, not proof, and state the re-ask rule: if what the
+   owner tried changes after their answer, ask again.
 
 **DoD:**
 - [ ] All ACs pass; full test suite green (no regressions).

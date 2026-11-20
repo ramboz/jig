@@ -561,6 +561,31 @@ The orchestrator runs the passes in this order:
    authors opt in with `code_health_review: true`. The evidence file is
    `reviews/slice-NN-code-health.md`.
 
+5. **Owner-review pass** (on-demand, **gated**; spec 124 /
+   [ADR-0069](../../docs/decisions/adr-0069-owner-review-human-attested-evidence.md)).
+   Query `workflow.py owner-review-needed`. When it prints `true` (the
+   slice declares `owner_review: true`), the owner tries the slice
+   themselves. **Ask first, not last:** as soon as implementation is
+   finished, run `review.py owner-review "docs/specs/NNN-<slug>/spec.md"
+   "<slice-fragment>"`, put its question to the owner, and carry on with
+   passes 1–4 in parallel while they try it. No subagent runs this pass —
+   a person answers. Record their reply with `review.py record-review …
+   --pass owner-review --verdict pass|needs-changes --tried "…" --surface
+   "…" --owner-quote "…"` (evidence file
+   `reviews/slice-NN-owner-review.md`), then show them the recorded file.
+   **Never infer this verdict.** Record only the owner's reply to the
+   question, word for word; silence, an earlier general approval, a reply
+   about something else, and your own run of the feature are not answers.
+   With no person to ask (an unattended run), record nothing — the slice
+   waits. The record is a deliberateness signal, not proof that anyone
+   tried anything (ADR-0011): it puts the owner's quoted answer in the
+   diff where they can contradict it.
+
+   **The owner's hands-on check belongs here**, with the review batch,
+   before reconciliation — not in the DoD after `RECONCILED`. A DoD line is
+   enforced only at `DONE`, after the deviation log, sweep and decision
+   records are written, so a rejection there means redoing them.
+
 When spawning any reviewer Task above, prefix the Task prompt with telemetry
 tags before the `review.py` body: `[jig:phase=<phase>] [jig:spec=NNN]
 [jig:slice=NNN-NN]`. Use `compliance` for `review.py implementation`,
@@ -604,7 +629,8 @@ count `[spec]`-tagged themes across specs (docs/refinement-todo.md
 — exists and clears (`verdict: pass`). `REVIEWED` requires
 `compliance` + `craft` (+ `arch` when the slice declares
 `arch_review: true`, + `code-health` when it declares
-`code_health_review: true`); `RECONCILED` requires the `reconciliation` verdict
+`code_health_review: true`, + `owner-review` when it declares
+`owner_review: true`); `RECONCILED` requires the `reconciliation` verdict
 **and** `### Deviation log` plus `### Reconciliation sweep` subsections;
 `DONE` re-validates the post-implementation and reconciliation evidence set
 (in addition to the existing `dependencies:` check). A refusal names
@@ -631,6 +657,17 @@ After all required passes pass:
    re-validates the recorded `compliance` + `craft` (+ `arch`,
    + `code-health`) verdicts before the status flips (and before the
    003-04 auto-tick).
+
+**When the owner asks for changes (spec 124).** A non-`pass` owner verdict
+blocks `REVIEWED`: the slice stays `IN_PROGRESS`, and you do not start
+reconciliation. Make the changes, re-run the automated passes, ask the
+owner again (say what changed) and record the new answer. On an
+`owner_review: true` slice a non-`pass` verdict from *any* `REVIEWED`-stage
+pass reopens the whole batch: `record-review` stamps `review_reopened_at`
+on the slice and every verdict recorded before it stops clearing,
+including an owner `pass` given before the fix. The owner may reply that
+they do not need to try it again; record that in their words. If what the
+owner tried changes after their answer for any other reason, ask again.
 
 **Recovering from a failed review.** A `fail`/`needs-changes` verdict — or
 a `[blocker]`-tagged craft/arch finding, which is recorded as a non-`pass`
@@ -917,6 +954,10 @@ last_verified:
   any listed dependency is not DONE / accepted.
 - `last_verified` — date the slice was last reconciled. `transition`
   stamps this automatically on `→ RECONCILED`. Used by `stale`.
+- `owner_review` (optional, spec 124) — `true` when the owner wants to try
+  the slice themselves before it is reconciled (adds the `owner-review`
+  pass to the `REVIEWED` set); `false` when they were asked and said no;
+  absent when nobody has asked yet.
 
 Legacy slices using prose `**STATUS:**` markers still work — the
 transition helper writes to whichever shape is present. No retroactive

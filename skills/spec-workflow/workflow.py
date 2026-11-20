@@ -365,6 +365,20 @@ def slice_needs_design_review(spec_path, slice_fragment: str) -> bool:
     return frontmatter_flag_truthy(fields.get("design_review", ""))
 
 
+def slice_needs_owner_review(spec_path, slice_fragment: str) -> bool:
+    """Return True iff the slice's frontmatter declares `owner_review: true`
+    (spec 124-01 / ADR-0069; mirrors `slice_needs_arch_review`).
+
+    The owner-review pass is the one pass a person answers: the owner tries
+    the slice and their quoted answer is recorded. Same shared truthy
+    predicate as the gate's reader (`review_evidence._owner_review_flag`).
+    Defaults to False on any miss; raises WorkflowError on lookup failures.
+    """
+    loc = load_slice(spec_path, slice_fragment)
+    fields, _ = _slice_frontmatter(loc.text[loc.start:loc.end])
+    return frontmatter_flag_truthy(fields.get("owner_review", ""))
+
+
 # ---------- derived frame_review trigger (slice 064-04 / ADR-0020) ----------
 
 # A `## Assumptions` bullet/line that is a placeholder rather than a real
@@ -505,6 +519,8 @@ def derive_frame_review(spec_path, slice_fragment: str) -> bool:
 # inserted after the code-health phase and before reconcile.
 _SESSION_PLAN_PHASES = (
     ("implement", "delegate", "implementer", None),
+    # owner-review (conditional, spec 124-01) inserted here: asked first so
+    # the owner tries the slice while the automated passes run.
     ("compliance", "delegate", "reviewer", "jig:independent-review"),
     ("craft", "delegate", "reviewer", "pr-review"),
     # arch + code-health (both conditional) inserted here, in that order.
@@ -540,6 +556,14 @@ _SESSION_PLAN_CODE_HEALTH_PHASE = (
 _SESSION_PLAN_DESIGN_REVIEW_PHASE = (
     "design-review", "delegate", "reviewer", "jig:independent-review")
 
+# The conditional owner-review phase (spec 124-01 / ADR-0069). A person
+# answers it, so it is neither delegated nor an orchestrator step: the
+# orchestrator ASKS, right after `implement`, and carries on with the
+# automated passes while it waits.
+_SESSION_PLAN_OWNER_REVIEW_PHASE = (
+    "owner-review", "owner", None, "jig:independent-review")
+_SESSION_PLAN_OWNER_AFTER = "implement"
+
 # Slice 074-02: host-mode hints are advisory UX guidance, not lifecycle
 # state. Keep the values host-neutral so adapters can map them to Claude,
 # Codex, or another host without changing jig transition semantics.
@@ -551,6 +575,7 @@ _SESSION_PLAN_HOST_MODE_HINTS = {
     "arch": "review",
     "code-health": "review",
     "design-review": "review",
+    "owner-review": "review",
     "reconcile": "reconcile",
     "land": "land",
 }
@@ -616,8 +641,10 @@ def session_plan(spec_path: Path) -> str:
             fm_fields.get("code_health_review", ""))
         needs_design = frontmatter_flag_truthy(
             fm_fields.get("design_review", ""))
+        needs_owner = frontmatter_flag_truthy(
+            fm_fields.get("owner_review", ""))
         planned.append((loc.label, needs_frame, needs_arch, needs_code_health,
-                        needs_design))
+                        needs_design, needs_owner))
 
     lines = []
     lines.append(f"# Session plan — {spec_path}")
@@ -656,6 +683,8 @@ def session_plan(spec_path: Path) -> str:
     def _render_phase(step, phase, mode, actor, skill, note=""):
         if mode == "delegate":
             head = f"DELEGATE to [{actor}] subagent"
+        elif mode == "owner":
+            head = "WAITING ON THE OWNER (ask now; a person answers)"
         else:  # dispatch — orchestrator's own loop
             head = "ORCHESTRATOR step"
         if skill:
@@ -667,8 +696,8 @@ def session_plan(spec_path: Path) -> str:
             line += f"  {note}"
         return line
 
-    for label, needs_frame, needs_arch, needs_code_health, needs_design \
-            in planned:
+    for (label, needs_frame, needs_arch, needs_code_health, needs_design,
+         needs_owner) in planned:
         lines.append(f"## Slice {label}")
         lines.append("")
         step = 1
@@ -684,6 +713,17 @@ def session_plan(spec_path: Path) -> str:
         for phase, mode, actor, skill in _SESSION_PLAN_PHASES:
             lines.append(_render_phase(step, phase, mode, actor, skill))
             step += 1
+            if phase == _SESSION_PLAN_OWNER_AFTER and needs_owner:
+                ophase, omode, oactor, oskill = \
+                    _SESSION_PLAN_OWNER_REVIEW_PHASE
+                lines.append(_render_phase(
+                    step, ophase, omode, oactor, oskill,
+                    note="(slice declares owner_review: true — run "
+                         "`review.py owner-review` and ask the owner, in "
+                         "parallel with the review passes below; REVIEWED "
+                         "waits for their recorded answer; do not start "
+                         "reconcile before it)"))
+                step += 1
             if phase == _SESSION_PLAN_ARCH_AFTER:
                 # arch first (when declared), then code-health, then
                 # design-review — all conditional, all slotted between
@@ -6010,6 +6050,15 @@ def _build_parser() -> argparse.ArgumentParser:
     pdr.add_argument("slice",
                      help="slice name or fragment (case-insensitive substring)")
 
+    # Spec 124-01: owner-review-pass gating mirror of arch-review-needed.
+    powr = sub.add_parser(
+        "owner-review-needed",
+        help="print 'true' if the named slice's frontmatter declares "
+             "`owner_review: true`; 'false' otherwise (spec 124-01)",
+    )
+    powr.add_argument("spec", help="path to spec.md")
+    powr.add_argument("slice", help="slice name or fragment")
+
     # Slice 064-04: DERIVE (not read) whether the frame-critique pass should
     # fire — the mechanical ADR-0020 trigger (ADRs always-on; specs iff the
     # `## Assumptions` section carries >=1 real assumption). Mirrors
@@ -6140,6 +6189,9 @@ def main(argv: list) -> int:
             sys.stdout.write("true\n" if needed else "false\n")
         elif ns.command == "code-health-review-needed":
             needed = slice_needs_code_health_review(Path(ns.spec), ns.slice)
+            sys.stdout.write("true\n" if needed else "false\n")
+        elif ns.command == "owner-review-needed":
+            needed = slice_needs_owner_review(Path(ns.spec), ns.slice)
             sys.stdout.write("true\n" if needed else "false\n")
         elif ns.command == "design-review-needed":
             needed = slice_needs_design_review(Path(ns.spec), ns.slice)

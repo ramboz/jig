@@ -208,17 +208,19 @@ class NoNewDesignFidelityMechanismTests(unittest.TestCase):
         )
 
     def test_review_flag_deriver_set_unchanged(self):
-        # Exactly the three existing `slice_needs_*_review` derivers
-        # (arch, code_health, design) — no fourth was added.
+        # The `slice_needs_*_review` readers: arch, code_health, design, and
+        # (spec 124-01 / ADR-0069) owner — a human pass, not a
+        # design-fidelity mechanism. No other was added.
         derivers = re.findall(
             r"^def (slice_needs_\w+_review)\(", self.text, re.MULTILINE
         )
         self.assertEqual(
             sorted(derivers),
             ["slice_needs_arch_review", "slice_needs_code_health_review",
-             "slice_needs_design_review"],
-            "no new `slice_needs_*_review` deriver may be added — teeth "
-            "stay anchored to the existing three flags (104-02 AC4)",
+             "slice_needs_design_review", "slice_needs_owner_review"],
+            "no new design-fidelity `slice_needs_*_review` deriver may be "
+            "added — design teeth stay anchored to `design_review` "
+            "(104-02 AC4)",
         )
 
     def test_no_visual_design_keyword_detector_added(self):

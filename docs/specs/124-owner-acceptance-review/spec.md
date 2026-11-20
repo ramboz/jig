@@ -1,5 +1,5 @@
 ---
-status: DRAFT
+status: IN_PROGRESS
 skill: spec-workflow
 use_cases: [UC-4, UC-7]
 ---
@@ -45,7 +45,10 @@ this.
   decision 3).
 - **D4 — explicit flag, asked for.** `owner_review` is `true`, `false` or
   absent. Absent on a UI-related slice triggers the question (ADR-0069
-  decisions 6 and 7).
+  decisions 7 and 8).
+- **D5 — one rejection reopens the batch.** On a flagged slice any
+  non-`pass` verdict makes the verdicts recorded so far stale, so an owner
+  `pass` cannot outlive a fix it never saw (ADR-0069 decision 6).
 
 The two unverified premises behind this design (an agent-writable record is
 a usable deliberateness signal; a word list catches most UI slices) are

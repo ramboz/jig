@@ -49,9 +49,9 @@ the first pass whose author is a person.
 ### Option A: a new `ACCEPTED` state between `REVIEWED` and `RECONCILED`
 - **Pros:** the step is visible on the status board; matches the issue's
   first suggestion.
-- **Cons:** it puts the owner after the automated reviews, in series. The
-  owner's check and the reviews do not depend on each other, so a rejection
-  still throws away finished review work. A new state also touches every
+- **Cons:** it puts the owner after the automated reviews, in series, so
+  the owner's rejection always arrives after a full review round has been
+  paid for. A new state also touches every
   consumer of the state list (claims, cross-ref checks, the status board,
   `slice-land`, the bug-fix and refactor lifecycles that share the spine),
   for a step most slices do not need.
@@ -80,7 +80,7 @@ derived, true when the slice implements decisions not yet tried.
   lands before any reconciliation document exists; slices without the flag
   are unaffected.
 - **Cons:** the owner must opt in per slice, so a slice that needed the
-  check can still miss it (mitigated by asking at authoring time, decision 6);
+  check can still miss it (mitigated by asking at authoring time, decision 7);
   the evidence is a file an agent can write (decision 3).
 
 ### Option E: documentation only
@@ -98,9 +98,9 @@ records it and settles the details.
    required iff the slice's frontmatter sets `owner_review: true`. It uses
    the existing verdict file (`reviews/slice-NN-owner-review.md`), the
    existing gate rule (only `verdict: pass` clears, ADR-0014 §3), the
-   existing re-check at `DONE`, and the existing rule that a review
-   back-edge makes earlier verdicts stale (bug 039). There is no new
-   lifecycle state and no separate gate.
+   existing re-check at `DONE`, and the existing rule that a verdict not
+   newer than the slice's `review_reopened_at` stamp no longer clears
+   (bug 039). There is no new lifecycle state and no separate gate.
 
 2. **The verdict is the owner's, in the owner's words.** The record keeps
    the six frontmatter fields of ADR-0014 §2; `reviewer:` names the person.
@@ -125,20 +125,44 @@ records it and settles the details.
    and the question to put to the owner. The agent records a verdict only
    from the owner's reply to that question in the current conversation.
    Silence, an earlier general approval, a reply about something else, and
-   the agent's own run of the feature are not answers. With no person to
-   ask (an unattended run), nothing is recorded and the slice waits;
-   `record-review` refuses `--non-interactive` for this pass.
+   the agent's own run of the feature are not answers. A device check can
+   outlast the session that asked: a later session may record the owner's
+   reply to the standing question, but only from the owner's own message
+   in that session, never from an agent's notes about what the owner said.
+   With no person to ask (an unattended run), nothing is recorded and the
+   slice waits; `record-review` refuses `--non-interactive` for this pass.
+   After recording, the agent shows the owner the recorded file, and the
+   record is part of the diff the owner reviews before the slice lands;
+   those are the two moments a wrong quote can be caught.
 
 5. **The pass runs in parallel with the automated reviews, and a rejection
    goes back to `IN_PROGRESS` before reconciliation.** `workflow.py
    session-plan` lists `owner-review` straight after `implement`, marked as
-   waiting on the owner, so the question goes out while the reviewer
-   subagents run. A `needs-changes` (or `fail`) verdict blocks `REVIEWED`,
-   so the slice is still `IN_PROGRESS` and no deviation log, sweep or
-   decision record has been written. After the fix the owner is asked
-   again, and the automated passes are re-run on the changed deliverable.
+   waiting on the owner, so the question goes out once the build is
+   finished (not mid-build) and while the reviewer subagents run. A
+   `needs-changes` (or `fail`) verdict blocks `REVIEWED`, so the slice is
+   still `IN_PROGRESS` and no deviation log, sweep or decision record has
+   been written.
 
-6. **The flag is explicit, and jig asks for it.** `owner_review` has three
+6. **Any rejection in the batch reopens the whole batch.** The passes are
+   not independent: a fix made for one of them changes the build the others
+   judged. In particular, an owner `pass` given before an automated
+   reviewer asked for changes describes a build that no longer exists, and
+   re-asking costs the owner's time, so an agent would be tempted to keep
+   it. On an `owner_review: true` slice, `record-review` therefore stamps
+   the slice's `review_reopened_at` whenever it records a non-`pass`
+   verdict for a `REVIEWED`-stage pass, whoever the reviewer is. Every
+   verdict recorded up to that moment stops clearing: the automated passes
+   are re-run and the owner is asked again, with a summary of what changed.
+   The owner may answer that they do not need to try it again; that is
+   their call and is recorded in their words. This rule is limited to
+   flagged slices; other slices keep today's behaviour (re-run only the
+   pass that failed). It does not catch a change made without any
+   non-`pass` verdict (general code-staleness stays deferred, ADR-0014
+   Scope); the ask and the docs state the rule for that case: if what the
+   owner tried changes after their answer, ask again.
+
+7. **The flag is explicit, and jig asks for it.** `owner_review` has three
    readings: `true` (required), `false` (the owner said no) and absent (not
    yet asked). When a slice looks UI-related and the flag is absent, jig
    asks the owner whether they want to try the slice themselves before it
@@ -150,7 +174,7 @@ records it and settles the details.
    and repeated as a non-blocking note on the slice's forward transitions
    and in `session-plan` until the flag has a value.
 
-7. **`design_review: true` recommends yes; it does not set the flag.** A
+8. **`design_review: true` recommends yes; it does not set the flag.** A
    slice with a design-fidelity gate ships a screen, so the question
    suggests yes. The owner still answers, because the flag creates a gate
    that only they can clear.
@@ -159,7 +183,9 @@ records it and settles the details.
 
 **Becomes easier:**
 - Getting the owner's first real test before reconciliation, at the cost of
-  one question when the slice is written.
+  one question when the slice is written. The re-loop is shortened, not
+  removed: implementation and a review round are still spent before the
+  first real test of a paper decision.
 - Seeing that a slice is waiting on a person: `session-plan` says so.
 - Auditing: the owner's quoted answer sits beside the other verdicts.
 
@@ -168,6 +194,8 @@ records it and settles the details.
   run. That is intended, and the autonomy layer has to treat it as a wait
   on a person, not as a failure to retry.
 - One more pass name for every consumer of `PASSES`.
+- On a flagged slice, one failing pass means re-running the whole review
+  batch and asking the owner again (decision 6).
 - The word list gives false positives (one question, answered once with
   `owner_review: false`) and false negatives (the owner can still set the
   flag by hand).
@@ -184,7 +212,10 @@ Probed facts (2026-11-20): `required_passes`, `validate_evidence` and the
 `DONE` re-check behave as described in Context (read in
 `skills/_common/review_evidence.py` and `_gate_evidence` in
 `skills/spec-workflow/workflow.py`); `session_plan` emits the conditional
-review phases after `craft` (read in `workflow.py`).
+review phases after `craft` (read in `workflow.py`); `review_reopened_at`
+is stamped today only on a transition out of `REVIEWED` / `RECONCILED` /
+`DONE` (read in `workflow.py transition`), so without decision 6 a slice
+that never left `IN_PROGRESS` would carry no stamp.
 
 ## Kill criteria
 
@@ -200,12 +231,11 @@ review phases after `craft` (read in `workflow.py`).
 
 ## Open questions
 
-- **Stale automated verdicts after an owner rejection.** When the owner
-  rejects and the code changes, automated verdicts recorded earlier in the
-  same round still read `pass` (general code-staleness is deferred,
-  ADR-0014 Scope). The documented response is to re-run them. Stamping
-  `review_reopened_at` when a non-`pass` owner verdict is recorded would
-  enforce it; deferred until a real miss shows the documentation is not
-  enough.
+- **A change with no failing verdict.** Decision 6 keys on a recorded
+  non-`pass` verdict. A change made after the owner's answer without one
+  (a nit fixed after a `pass`, say) is covered only by the stated rule.
+  Binding the owner's verdict to a commit and comparing at the gate would
+  close it, at the cost of defining "the deliverable" for every project;
+  deferred until a real miss.
 - **The bug lifecycle.** `bug.py` has its own `REVIEWED` gate and no owner
   pass. Not needed for issue 254; see kill criterion 3.
