@@ -26,7 +26,7 @@ claimed_by: claude/xenodochial-tu-c3ef9e
 
 ## Slice 123-01 — exit-contract
 
-**Goal:** for a custom test command (`.jig/test-command`), only exit 1 is read as a failing test; every other non-zero exit is reported by `tdd.py run` as an environment error (exit 2). A project wrapper can then refuse to vouch for a run, and neither the bug-fix `FIXING` gate nor `slice-land` treats "could not run" as a result.
+**Goal:** for a custom test command (`.jig/test-command`), only exit 1 is read as a failing test; every other non-zero exit is reported by `tdd.py run` as an environment error (exit 2). A project wrapper can then refuse to vouch for a run, and neither the bug-fix `FIXING` gate nor `slice-land` treats "could not run" as a result. (Whether a command's exit 1 is honest stays the command's responsibility; the `REVIEWED` green check is bug 043.)
 
 **Decision:** [ADR-0068](../../decisions/adr-0068-no-per-framework-runner-adapters.md) §2; spec 123 D1 and D4.
 
@@ -46,14 +46,16 @@ claimed_by: claude/xenodochial-tu-c3ef9e
 4. **0 and 1 are unchanged.** Exit 0 → 0 and exit 1 → 1 in both branches.
 5. **Earlier refusals are unchanged.** A selector against a command with no `{test}` token still exits 2 with the bug 021 message; an exit 1 with a recognized no-match line still exits 2 with `unresolved selector`.
 6. **The bug-fix gate does not accept it.** `bug.py transition <id> FIXING` on a project whose custom command exits 2 fails with the "not evidence of red" error, the error quotes the `tdd.py` contract line, the record's status stays `ROOT_CAUSED`, and `red_confirmed_at` is not stamped. A custom command that exits 1 still enters `FIXING`. Both run the real `tdd.py`, not a stub helper.
-7. **`slice-land` blocks on "could not run".** `land.py check_tests` returns a status distinct from `warn`, `red` and `not_run` when `tdd.py run` exits 2 **and** `tdd.py detect` finds a runner. The readiness report renders it as tests that could not be run and not as a pass, without the doc-only wording, and it is a blocker (the verdict is not GO). Checked against the real `tdd.py` with a custom command that exits 2.
+6a. **`tdd.py` does not answer 1 for its own failures.** An unparsable `.jig/test-command` (unbalanced quote) exits 2 with a message naming the file, in both branches; command output that is not valid UTF-8 does not crash a targeted run; an uncaught exception inside `tdd.py` exits 2, not 1.
+7. **`slice-land` blocks on "could not run".** `land.py check_tests` returns a status distinct from `warn`, `red` and `not_run` when `tdd.py run` exits 2 **and** `tdd.py detect` finds a runner. The readiness report renders it as tests that could not be run and not as a pass, without the doc-only wording, and it is a blocker (the verdict is not GO). The row quotes `tdd.py`'s last stderr line, so the reason and the pointer to `.jig/test-command` reach the operator. The servo suggestion stays silent for this status, as it does for `warn` and `not_run`. Checked against the real `tdd.py` with a custom command that exits 2.
 8. **The doc-only warning is unchanged where it is true.** With no runner detected, `check_tests` still returns `warn`, the row keeps its wording, and it does not block.
 9. **The contract is documented** in `skills/tdd-loop/SKILL.md` (the custom-command gotcha and the exit-code list) and the land gate's new row in `skills/slice-land/SKILL.md`.
 
 **Edge cases to cover explicitly:**
 - A command that exits 2 **and** prints a no-match line: exit 2 either way; the contract line is reported (the exit code is checked first).
 - A command killed by a signal (negative return code) is an environment error.
-- The `REVIEWED` green check on a non-zero exit behaves as before (any non-zero routes the bug back to `DIAGNOSING`); this slice does not change it.
+- The `REVIEWED` green check is a third read site and is **not** changed: any non-zero exit, including an environment error, still routes the bug back to `DIAGNOSING` and makes recorded verdicts stale. That is wrong for an environment error and is tracked as [bug 043](../../bugs/043-reviewed-gate-env-error-reopens-bug.md); it is bug-lifecycle behaviour (ADR-0016) pinned by a bug 021 test, so it gets its own diagnosis.
+- A project detected as pytest whose pytest module is missing (for example a unittest-only project with `test_*.py` files) moves from the doc-only warning to a land blocker. The row quotes `tdd.py`'s reason ("pytest module is not installed"); the ways out are installing pytest or a `.jig/test-command`.
 - Built-in runners that already exit 2 with a runner present (for example the pytest module missing) now block `slice-land` too; that is intended (spec D4).
 
 **DoD:**

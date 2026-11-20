@@ -139,13 +139,24 @@ deaths as red, for backward compatibility.
    command sound. A command is only as good as its exit 1: a build tool that
    exits 1 for a compile failure (Gradle, Maven) needs a wrapper that checks
    a test really ran and failed before it exits 1.
-   **Both consumers of the exit code treat "could not run" as a refusal.**
-   `bug.py` already refuses a `tdd.py` exit 2 at `FIXING`. `slice-land`
-   (`land.py check_tests`) mapped every exit 2 to its non-blocking "no test
-   runner detected (slice may be doc-only)" warning; it now asks `tdd.py
-   detect` and blocks when a runner exists but could not run. Without that,
-   this decision would turn a failing `make test`, or a wrapper correctly
-   reporting a broken build, from a land blocker into a soft warning.
+   **`tdd.py` itself never answers 1 for its own failures.** A crash inside
+   the helper, an unparsable `.jig/test-command` or undecodable command
+   output is exit 2, not 1 (the helper's catch-all used to return 1).
+
+   **Where the exit code is read.** `tdd.py run` has three read sites in jig:
+   - `bug.py` `→ FIXING` already refuses an exit 2 ("not evidence of red").
+   - `slice-land` (`land.py check_tests`) mapped every exit 2 to its
+     non-blocking "no test runner detected (slice may be doc-only)" warning.
+     It now asks `tdd.py detect`, blocks when a runner exists but could not
+     run, and quotes `tdd.py`'s last line as the reason. Without that, this
+     decision would turn a failing `make test`, or a wrapper correctly
+     reporting a broken build, from a land blocker into a soft warning.
+   - `bug.py` `→ REVIEWED` treats any non-zero exit as a failed fix and
+     routes the record back to `DIAGNOSING`. That is unchanged by this
+     decision and is wrong for an environment error; it is tracked as
+     [bug 043](../bugs/043-reviewed-gate-env-error-reopens-bug.md), because
+     the back-edge belongs to the bug lifecycle (ADR-0016), not to the runner
+     contract.
 3. **The dead end names the way out.** When no runner is detected,
    `tdd.py detect` / `run` (and so the `bug.py` gate error, which quotes the
    last line) name `.jig/test-command`, the `{test}` placeholder and the
@@ -164,8 +175,9 @@ deaths as red, for backward compatibility.
 **Becomes easier:**
 - Any stack can make the bug-fix gates sound with a small script it owns.
 - A runner request has one answer, and `detect` prints it.
-- A wrapper can refuse to vouch for a run, and a wrapper that breaks (missing
-  tool, killed process) is not mistaken for a failing test.
+- A wrapper can refuse to vouch for a run, and a wrapper that dies with a
+  shell's 126/127 or a signal is not mistaken for a failing test. (A wrapper
+  that crashes with status 1 still is; see below.)
 
 **Becomes harder:**
 - **Existing custom commands whose failing-test status is not 1 change from
@@ -178,20 +190,30 @@ deaths as red, for backward compatibility.
   1 only when a test ran and failed. A blanket `|| exit 1` is **not** the
   fix: it turns a build failure back into red, which is the defect this
   decision removes.
-- Statuses that already mean "could not run" are now read correctly: pytest
-  exits 2 on a collection error and 4 when nothing matched, `sh` exits 2 on a
-  syntax error, `argparse` exits 2 on a usage error (all probed). jig's own
-  command, `python3 scripts/run_tests.py {test}`, exits only 0 or 1 from its
-  result paths.
+- Statuses that already mean "could not run" are now read correctly **when
+  the tool is the custom command**: pytest exits 2 on a collection error and
+  4 when nothing matched, `sh` exits 2 on a syntax error, `argparse` exits 2
+  on a usage error (all probed).
+- **The built-in runner paths are not changed and are now looser than the
+  extension point beside them.** They still map every non-zero status to red,
+  so a test file that cannot be loaded is red on `node --test` (probed) and on
+  a whole-suite pytest run. jig's own custom command has the same flaw from
+  the inside: `scripts/run_tests.py` exits 1 for a test module that fails to
+  import. Tracked as
+  [bug 042](../bugs/042-builtin-runners-read-load-failure-as-red.md).
 - `slice-land` now blocks on any detected runner that could not run. That
   includes built-in cases which exited 2 before this decision and were shown
   as the doc-only warning (pytest module not installed, runner binary
   missing): they were soft warnings and become blockers.
 - A Gradle (or Maven, Go, Rust…) project has a setup step before the bug-fix
   gates work, and owns the correctness of its wrapper.
-- A bare command that exits 1 for everything is as unsound as before. jig
-  cannot detect that; the no-runner message and the recipe say what exit 1
-  must mean.
+- A bare command that exits 1 for everything is as unsound as before, and so
+  is a wrapper that crashes with status 1 (an uncaught exception in a Python
+  or Node script, `set -e` in a shell script). jig cannot detect either; the
+  no-runner message and the recipe say what exit 1 must mean. Before this
+  decision a Gradle project was stopped at the gate; now it is pointed at a
+  file where the bare command gives a silent false red, so the message and
+  the bug-fix skill both carry the build-failure caveat.
 
 ## Assumptions
 

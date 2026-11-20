@@ -68,9 +68,16 @@ No new built-in runner, no Maven, no JUnit-XML reader in jig.
 
 ## Assumptions
 
-- **A1 — the built-in vitest / jest / node paths are not changed here.**
-  Whether they read a compile or syntax failure as red is checked during
-  implementation and, if real, filed on the bug board, not fixed in this spec.
+- **A1 — the built-in pytest / vitest / jest / node paths are not changed
+  here.** They read a test file that cannot be loaded as red (node probed;
+  pytest on a whole-suite run; vitest and jest not probed). Filed as
+  [bug 042](../../bugs/042-builtin-runners-read-load-failure-as-red.md), not
+  fixed in this spec (owner's instruction).
+- **A3 — the `REVIEWED` green check is not changed here.** It routes any
+  non-zero `tdd.py` exit, including an environment error, back to
+  `DIAGNOSING`. Filed as
+  [bug 043](../../bugs/043-reviewed-gate-env-error-reopens-bug.md): the
+  back-edge is bug-lifecycle behaviour (ADR-0016) pinned by a bug 021 test.
 - **A2 — the recipe is not run against real Gradle.** No Gradle is installed
   in jig's development or CI environment. The stub-`gradlew` test covers the
   wrapper's own logic (exit mapping, report reading, selector mapping), not
@@ -81,8 +88,9 @@ No new built-in runner, no Maven, no JUnit-XML reader in jig.
 SPIDR: split by **Rules** then **Interfaces**.
 
 - **123-01 (Rules):** the exit rule on the custom-command path, both
-  branches, and its two consumers: the bug-fix `FIXING` gate refuses it and
-  `slice-land` blocks on it.
+  branches, `tdd.py`'s own failure paths, and two of the three places the
+  exit code is read: the bug-fix `FIXING` gate refuses it and `slice-land`
+  blocks on it. The third, the `REVIEWED` green check, is bug 043.
 - **123-02 (Interfaces):** what the user sees and reads — the no-runner
   message, the policy in the docs, the recipes document.
 

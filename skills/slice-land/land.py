@@ -13,8 +13,10 @@ Subcommands:
 
 Readiness checks:
   1. STATUS line under the slice header equals "DONE".
-  2. `tdd.py run` (shelled out) returns 0 (green) — exit 2 (no runner)
-     surfaces as a yellow warning, not a hard block. Exit 1 is a blocker.
+  2. `tdd.py run` (shelled out) returns 0 (green) — exit 2 with no runner
+     detected surfaces as a yellow warning, not a hard block. Exit 1 is a
+     blocker, and so is exit 2 when a runner WAS detected but could not run
+     (`could_not_run`, spec 123-01 / ADR-0068).
      If the `tdd.py` helper itself cannot be located (env/layout problem,
      e.g. a vendored `jig-`-prefixed install), the row is a loud `not_run`
      ("NOT RUN"), distinct from the doc-only warning (bug 024 / issue #129).
@@ -306,12 +308,28 @@ def _resolve_tdd_py() -> Path | None:
     return None
 
 
+# Spec 123-01: tdd.py's last stderr line from the most recent `could_not_run`
+# check — the reason the suite could not run. Kept beside `check_tests`
+# instead of widening its `(status, exit_code)` return, which callers unpack.
+_could_not_run_detail = ""
+
+
+def _last_line(text: str) -> str:
+    lines = [ln.strip() for ln in str(text or "").splitlines() if ln.strip()]
+    return lines[-1][:300] if lines else ""
+
+
 def check_tests(target: Path) -> tuple:
     """Shell out to tdd.py run. Returns (status, exit_code) where status is
-    one of 'green', 'red', 'warn', 'not_run'.
+    one of 'green', 'red', 'warn', 'could_not_run', 'not_run'.
 
     - 'warn'    — tdd.py ran and detected no runner (exit 2): legitimately a
       doc-only slice.
+    - 'could_not_run' — exit 2 although `tdd.py detect` finds a runner: a
+      custom command reported it could not run the tests (build failure,
+      missing tool — ADR-0068), the pytest module is missing, a runner binary
+      is absent. Not red, and not "no tests here" either: it BLOCKS, because
+      a suite that could not run is no evidence of green (spec 123-01).
     - 'not_run' — the `tdd.py` helper could not be located, so the check never
       ran (an environment/layout problem). Kept DISTINCT from 'warn' (bug 024
       / issue #129): conflating "check could not run" with "no tests here" let
@@ -319,6 +337,8 @@ def check_tests(target: Path) -> tuple:
       loudly; non-gating on the exit code because a missing helper is not
       evidence of red tests.
     """
+    global _could_not_run_detail
+    _could_not_run_detail = ""
     tdd_py = _resolve_tdd_py()
     if tdd_py is None:
         return "not_run", -1
@@ -332,8 +352,22 @@ def check_tests(target: Path) -> tuple:
     if result.returncode == 0:
         return "green", 0
     if result.returncode == 2:
+        detected = subprocess.run(
+            [sys.executable, str(tdd_py), "detect", str(target)],
+            capture_output=True, text=True,
+        )
+        if detected.returncode == 0:
+            _could_not_run_detail = (
+                _last_line(result.stderr) or _last_line(result.stdout))
+            return "could_not_run", 2
         return "warn", 2
     return "red", result.returncode
+
+
+def tests_block(test_status: str) -> bool:
+    """True when the test check blocks the landing: the suite is red, or a
+    detected runner could not run it (spec 123-01)."""
+    return test_status in ("red", "could_not_run")
 
 
 # Slice 045-03: `check_deviation_log` was lifted to `_common.parsing` so the
@@ -521,6 +555,16 @@ def render_readiness_section(checks: dict) -> str:
         # `[?]` marker — warning, neither pass nor fail
         lines.append("- [?] Tests: warning — no test runner detected "
                      "(slice may be doc-only)")
+    elif test_status == "could_not_run":
+        # Spec 123-01 — a runner exists but `tdd.py run` exited 2.
+        lines.append("- [ ] Tests: COULD NOT RUN — a test runner was "
+                     "detected but `tdd.py run` exited 2 (environment error: "
+                     "build failure, missing tool, or a `.jig/test-command` "
+                     "that reported it could not run the tests). This is "
+                     "NOT a pass."
+                     + (f" `tdd.py` said: {checks['test_detail']}"
+                        if checks.get("test_detail") else
+                        " Run `tdd.py run` to see why."))
     elif test_status == "not_run":
         # Bug 024 / issue #129 — the tdd.py helper could not be located, so
         # the gate never ran. `[!]` marker + explicit NOT RUN wording so this
@@ -575,6 +619,11 @@ def render_blockers(checks: dict) -> str:
     if checks["test_status"] == "red":
         blockers.append(
             f"- Tests are red (`tdd.py run` exit {checks['test_exit']}). Fix failures first."
+        )
+    if checks["test_status"] == "could_not_run":
+        blockers.append(
+            "- Tests could not be run (`tdd.py run` exit 2 with a runner "
+            "detected). Fix the build or the test environment first."
         )
     # Slice 019-01: skip the deviation-log blocker when the caller
     # opted in via --no-deviation-log. The check still runs and shows
@@ -883,8 +932,11 @@ def render_servo_suggestion(target: Path, test_status: str) -> str:
     advisory); servo's host-global marker is available (AC1/AC2); the
     `.jig/no-servo-hint` opt-out is absent; and the `.jig/servo-hint-shown`
     once-per-project breadcrumb is absent (AC6)."""
-    if test_status in ("warn", "not_run"):  # AC4 — no runner detected, or the
-        return ""                           # gate never ran (runner unknown)
+    # AC4 — no runner detected, or the gate never ran (runner unknown), or
+    # the runner could not run (spec 123-01: a blocked report, not the place
+    # for a suggestion).
+    if test_status in ("warn", "not_run", "could_not_run"):
+        return ""
     if _servo_present(target):             # 072-01's case, not this one
         return ""
     if _servo_hint_opted_out(target):      # explicit permanent opt-out (AC2)
@@ -986,6 +1038,7 @@ def prepare(spec_path: Path, slice_fragment: str,
         "status_ok": status_ok,
         "status_actual": status_actual,
         "test_status": test_status,
+        "test_detail": _could_not_run_detail,
         "test_exit": test_exit,
         "deviation_log_ok": deviation_log_ok,
         "dod_ok": dod_ok,
@@ -1024,7 +1077,7 @@ def prepare(spec_path: Path, slice_fragment: str,
     # warning above, never to a blocker.
     has_blocker = (
         not status_ok
-        or test_status == "red"
+        or tests_block(test_status)
         or (not deviation_log_ok and not skip_deviation_log)
         or not dod_ok
         or checks["cross_ref_blocked"]

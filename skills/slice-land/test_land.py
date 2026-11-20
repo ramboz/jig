@@ -2951,6 +2951,92 @@ class CheckTestsHelperResolutionTests(unittest.TestCase):
             f"vendored green suite must report green, got {status} ({code})")
 
 
+
+class Spec123CouldNotRunTests(unittest.TestCase):
+    """Spec 123-01 / ADR-0068: `tdd.py run` exit 2 means two different
+    things. No runner detected stays the non-blocking doc-only `warn`; a
+    runner that exists but could not run (a custom command reporting a build
+    failure, a missing tool) is `could_not_run` and blocks the landing."""
+
+    def setUp(self):
+        self.tmp = tempfile.TemporaryDirectory()
+        self.proj = Path(self.tmp.name)
+
+    def tearDown(self):
+        self.tmp.cleanup()
+
+    def _custom_command(self, code: int) -> None:
+        (self.proj / "exiter.py").write_text(f"raise SystemExit({code})\n")
+        jig = self.proj / ".jig"
+        jig.mkdir()
+        (jig / "test-command").write_text(
+            f"{sys.executable} exiter.py {{test}}\n")
+
+    def _checks(self, test_status: str, test_exit: int) -> dict:
+        return {
+            "status_ok": True, "status_actual": "DONE",
+            "test_status": test_status, "test_exit": test_exit,
+            "deviation_log_ok": True, "dod_ok": True,
+            "dod_ticked": 3, "dod_total": 3,
+            "skip_deviation_log": False,
+        }
+
+    def test_custom_command_exit_2_is_could_not_run(self):
+        # AC7, against the real tdd.py.
+        self._custom_command(2)
+        self.assertEqual(_land.check_tests(self.proj), ("could_not_run", 2))
+        # The reason reaches the report: tdd.py's contract line is quoted.
+        self.assertIn("custom test command exited 2",
+                      _land._could_not_run_detail)
+        checks = self._checks("could_not_run", 2)
+        checks["test_detail"] = _land._could_not_run_detail
+        section = _land.render_readiness_section(checks)
+        self.assertIn(".jig/test-command", section)
+        self.assertIn("custom test command exited 2", section)
+
+    def test_detail_is_cleared_by_a_later_check(self):
+        self._custom_command(2)
+        _land.check_tests(self.proj)
+        (self.proj / "exiter.py").write_text("raise SystemExit(0)\n")
+        _land.check_tests(self.proj)
+        self.assertEqual(_land._could_not_run_detail, "")
+
+    def test_could_not_run_keeps_the_servo_suggestion_silent(self):
+        self.assertEqual(
+            _land.render_servo_suggestion(self.proj, "could_not_run"), "")
+
+    def test_custom_command_exit_1_is_red_and_exit_0_green(self):
+        self._custom_command(1)
+        self.assertEqual(_land.check_tests(self.proj)[0], "red")
+        (self.proj / "exiter.py").write_text("raise SystemExit(0)\n")
+        self.assertEqual(_land.check_tests(self.proj)[0], "green")
+
+    def test_no_runner_is_still_the_doc_only_warn(self):
+        # AC8.
+        self.assertEqual(_land.check_tests(self.proj), ("warn", 2))
+        section = _land.render_readiness_section(self._checks("warn", 2))
+        self.assertIn("no test runner detected", section)
+        self.assertEqual(_land.render_blockers(self._checks("warn", 2)), "")
+        self.assertFalse(_land.tests_block("warn"))
+
+    def test_could_not_run_row_is_loud_and_not_doc_only(self):
+        section = _land.render_readiness_section(
+            self._checks("could_not_run", 2))
+        self.assertIn("COULD NOT RUN", section)
+        self.assertIn("NOT a pass", section)
+        self.assertNotIn("[x] Tests", section)
+        self.assertNotIn("no test runner detected", section)
+        self.assertNotIn("doc-only", section)
+
+    def test_could_not_run_is_a_blocker(self):
+        self.assertTrue(_land.tests_block("could_not_run"))
+        self.assertTrue(_land.tests_block("red"))
+        self.assertFalse(_land.tests_block("green"))
+        self.assertFalse(_land.tests_block("not_run"))
+        blockers = _land.render_blockers(self._checks("could_not_run", 2))
+        self.assertIn("could not be run", blockers)
+
+
 # ==================== Cross-ref Class-A backstop (slice 112-01 / ADR-0058) ====================
 
 

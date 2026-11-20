@@ -2070,6 +2070,23 @@ class Spec123CustomCommandGateTests(_BugTransitionFixture):
         self.assertEqual(self._fm()["status"], "FIXING")
         self.assertNotEqual(str(self._fm().get("red_confirmed_at") or ""), "")
 
+    def test_no_runner_gate_error_names_the_way_out(self):
+        # 123-02 AC3: an empty project has no runner; the gate error must
+        # carry tdd.py's guidance line, not just an exit code.
+        r = self._fixing()
+        self.assertNotEqual(r.returncode, 0)
+        self.assertIn("not evidence of red", r.stderr)
+        for needle in (".jig/test-command", "{test}", "0 = tests passed",
+                       "1 = a test ran and failed", "could not run",
+                       "build failure", "test-command-recipes.md"):
+            self.assertIn(needle, r.stderr)
+        self.assertEqual(self._fm()["status"], "ROOT_CAUSED")
+
+    def test_bug_fix_skill_links_contract_and_recipes(self):
+        text = (REPO_ROOT / "skills" / "bug-fix" / "SKILL.md").read_text()
+        self.assertIn("test-command-recipes.md", text)
+        self.assertIn("ADR-0068", text)
+
 
 class Bug039ReviewBackEdgeTests(_BugTransitionFixture):
     """Bug 039 / issue 235: the documented `REVIEWED → FIXING` back-edge

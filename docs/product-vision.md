@@ -156,8 +156,10 @@ for the live status board.
 - **Auto-coding from the elicited spec.** Elicitation produces *docs*
   (vision, architecture, draft ADRs). Implementation is still
   `/jig:spec-workflow` + `implementer` subagent.
-- **Polyglot test runner support beyond pytest/vitest/jest.** Add
-  others when a real project hits the gap.
+- **A test-runner adapter per framework.** The built-in runners are pytest,
+  vitest, jest and `node --test`, and that list is closed. Every other stack
+  connects through the `.jig/test-command` contract
+  ([ADR-0068](decisions/adr-0068-no-per-framework-runner-adapters.md)).
 - **A web UI, dashboard, or external service.** Jig is a pair of host-native
   plugins plus scaffolded project files. That's the whole product.
 

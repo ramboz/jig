@@ -885,33 +885,52 @@ class Spec123CustomCommandExitContractTests(unittest.TestCase):
     def _last_stderr_line(self, r) -> str:
         return [ln for ln in r.stderr.splitlines() if ln.strip()][-1]
 
-    def test_exit_2_is_environment_error_in_both_branches(self):
+    def test_any_status_but_0_and_1_is_environment_error_in_both_branches(self):
         # AC1 (selector branch) + AC2 (whole-suite branch).
         for selector in (True, False):
-            with self.subTest(selector=selector):
-                r = self._run(2, selector=selector)
-                self.assertEqual(r.returncode, 2, r.stdout + r.stderr)
-
-    def test_exit_2_message_names_the_contract_on_the_last_line(self):
-        # AC3: one last stderr line — bug.py quotes exactly that line.
-        for selector in (True, False):
-            with self.subTest(selector=selector):
-                line = self._last_stderr_line(self._run(2, selector=selector))
-                self.assertIn("exited 2", line)
-                self.assertIn(".jig/test-command", line)
-                self.assertIn("environment error", line)
-                for code in ("0", "1", "2"):
-                    self.assertRegex(line, rf"\b{code} ")
-                self.assertIn("exit 1", line)  # the wrap-it fix
-                self.assertLessEqual(len(line), 300)
-
-    def test_zero_and_one_unchanged_and_other_nonzero_stays_red(self):
-        # AC4.
-        for selector in (True, False):
-            for code, want in ((0, 0), (1, 1), (3, 1), (101, 1)):
+            for code in (2, 3, 101, 127):
                 with self.subTest(selector=selector, code=code):
                     r = self._run(code, selector=selector)
-                    self.assertEqual(r.returncode, want, r.stdout + r.stderr)
+                    self.assertEqual(r.returncode, 2, r.stdout + r.stderr)
+
+    def test_message_names_the_contract_on_the_last_line(self):
+        # AC3: one last stderr line — bug.py quotes exactly that line.
+        for selector in (True, False):
+            for code in (2, 127):
+                with self.subTest(selector=selector, code=code):
+                    line = self._last_stderr_line(
+                        self._run(code, selector=selector))
+                    self.assertIn(f"exited {code}", line)
+                    self.assertIn(".jig/test-command", line)
+                    self.assertIn("environment error", line)
+                    self.assertIn("not a failing test", line)
+                    self.assertIn("exit 1 only when a test ran and failed",
+                                  line)
+                    self.assertNotIn("||", line)  # no blanket `|| exit 1`
+                    self.assertLessEqual(len(line), 300)
+
+    def test_zero_and_one_are_unchanged(self):
+        # AC4.
+        for selector in (True, False):
+            for code in (0, 1):
+                with self.subTest(selector=selector, code=code):
+                    r = self._run(code, selector=selector)
+                    self.assertEqual(r.returncode, code, r.stdout + r.stderr)
+                    self.assertNotIn("environment error", r.stderr)
+
+    def test_death_by_signal_is_environment_error(self):
+        # Edge case: a killed command (negative return code) is not red.
+        (self.target / "killed.py").write_text(
+            "import os, signal\nos.kill(os.getpid(), signal.SIGKILL)\n")
+        for selector in (True, False):
+            with self.subTest(selector=selector):
+                _write(self.target / ".jig" / "test-command",
+                       f"{shlex.quote(sys.executable)} killed.py {{test}}\n")
+                args = ["run", str(self.target)]
+                if selector:
+                    args += ["--test", "pkg/test_x.py::Case"]
+                r = run_tdd(*args)
+                self.assertEqual(r.returncode, 2, r.stdout + r.stderr)
 
     def test_no_match_line_with_exit_1_is_still_unresolved_selector(self):
         # AC5: the bug 021 no-match mapping is unchanged.
@@ -925,12 +944,224 @@ class Spec123CustomCommandExitContractTests(unittest.TestCase):
         self.assertEqual(r.returncode, 2, r.stdout + r.stderr)
         self.assertIn("exited 2", self._last_stderr_line(r))
 
+    def test_unparsable_command_is_environment_error(self):
+        # An unbalanced quote must not surface as exit 1 (red).
+        _write(self.target / ".jig" / "test-command", "sh -c 'oops {test}\n")
+        for args in (["run", str(self.target)],
+                     ["run", str(self.target), "--test", "a::b"]):
+            r = run_tdd(*args)
+            self.assertEqual(r.returncode, 2, r.stdout + r.stderr)
+            self.assertIn(".jig/test-command cannot be parsed", r.stderr)
+
+    def test_undecodable_output_does_not_crash_a_targeted_run(self):
+        (self.target / "bytes.py").write_text(
+            "import sys\nsys.stdout.buffer.write(b'\\xff\\xfe bad\\n')\n"
+            "raise SystemExit(1)\n")
+        _write(self.target / ".jig" / "test-command",
+               f"{shlex.quote(sys.executable)} bytes.py {{test}}\n")
+        r = run_tdd("run", str(self.target), "--test", "a::b")
+        self.assertEqual(r.returncode, 1, r.stdout + r.stderr)
+        self.assertNotIn("tdd.py failed", r.stderr)
+
+    def test_helper_crash_is_exit_2_not_red(self):
+        tdd = _load_tdd()
+        with patch.object(tdd, "cmd_run", side_effect=RuntimeError("boom")):
+            self.assertEqual(tdd.main(["tdd.py", "run", str(self.target)]), 2)
+
     def test_skill_md_documents_the_contract(self):
         # AC7.
         text = SKILL_MD.read_text()
         self.assertIn("ADR-0068", text)
-        self.assertRegex(text, r"exits? `?2`?")
+        self.assertIn("a test ran and failed", text)
         self.assertIn("could not run", text)
+
+
+# ------------- Spec 123-02 — the no-runner dead end names the way out -------------
+
+
+class Spec123NoRunnerHintTests(unittest.TestCase):
+    """ADR-0068 §3: with no runner detected, detect/run say what to do. The
+    guidance is the LAST stderr line and fits the 300 characters bug.py
+    quotes untruncated."""
+
+    def setUp(self):
+        self.tmp = tempfile.TemporaryDirectory()
+        self.target = Path(self.tmp.name)
+
+    def tearDown(self):
+        self.tmp.cleanup()
+
+    def _check(self, r):
+        self.assertEqual(r.returncode, 2, r.stdout + r.stderr)
+        lines = [ln for ln in r.stderr.splitlines() if ln.strip()]
+        self.assertTrue(lines[0].startswith("no test runner detected at "))
+        last = lines[-1]
+        self.assertLessEqual(len(last), 300, last)
+        for needle in (".jig/test-command", "{test}", "0 = tests passed",
+                       "1 = a test ran and failed", "could not run",
+                       "build failure", "wrapper",
+                       "test-command-recipes.md"):
+            self.assertIn(needle, last)
+        # An earlier line carries the resolved path of the recipes document.
+        recipes = TDD_PY.parent / "test-command-recipes.md"
+        self.assertTrue(any(str(recipes) in ln for ln in lines[:-1]), lines)
+        self.assertTrue(recipes.is_file())
+
+    def test_detect_names_the_way_out(self):
+        self._check(run_tdd("detect", str(self.target)))
+
+    def test_run_names_the_way_out_with_and_without_selector(self):
+        self._check(run_tdd("run", str(self.target)))
+        self._check(run_tdd("run", str(self.target), "--test", "a/b.kt::c"))
+
+    def test_hint_is_not_printed_when_a_runner_is_detected(self):
+        _write(self.target / ".jig" / "test-command", "true\n")
+        r = run_tdd("detect", str(self.target))
+        self.assertEqual(r.returncode, 0)
+        self.assertNotIn("test-command-recipes.md", r.stderr)
+
+
+# ------------- Spec 123-02 — the Gradle recipe's wrapper, against a stub -------------
+
+RECIPES_MD = REPO_ROOT / "skills" / "tdd-loop" / "test-command-recipes.md"
+
+_STUB_GRADLEW = r"""#!/bin/sh
+# Stub gradlew: records its argv, optionally writes a JUnit XML report.
+printf '%s\n' "$@" > gradlew.args
+dir="${JIG_GRADLE_RESULTS:-build/test-results/test}"
+case "${STUB_REPORT:-none}" in
+  pass)  body='<testcase name="a" classname="p.C"/>' ;;
+  fail)  body='<testcase name="a" classname="p.C"><failure message="x">boom</failure></testcase>' ;;
+  error) body='<testcase name="a" classname="p.C"><error message="x">boom</error></testcase>' ;;
+  empty) body='' ;;
+  none)  exit "${STUB_EXIT:-0}" ;;
+esac
+mkdir -p "$dir"
+printf '<testsuite name="p.C">%s<system-err></system-err></testsuite>\n' "$body" > "$dir/TEST-p.C.xml"
+exit "${STUB_EXIT:-0}"
+"""
+
+
+def _recipe_script() -> str:
+    text = RECIPES_MD.read_text()
+    m = re.search(r"<!-- recipe:gradle-wrapper -->\n```sh\n(.*?)\n```", text,
+                  re.DOTALL)
+    assert m, "gradle wrapper block not found in the recipes document"
+    return m.group(1) + "\n"
+
+
+@unittest.skipUnless(os.path.exists("/bin/sh"), "needs sh")
+class Spec123GradleRecipeTests(unittest.TestCase):
+    """Slice 123-02 AC6: the wrapper printed in test-command-recipes.md is
+    extracted and run against a stub `gradlew`. This checks the script's own
+    logic (exit mapping, report reading, selector mapping) — not Gradle."""
+
+    def setUp(self):
+        self.tmp = tempfile.TemporaryDirectory()
+        self.proj = Path(self.tmp.name)
+        (self.proj / "wrapper.sh").write_text(_recipe_script())
+        gradlew = self.proj / "gradlew"
+        gradlew.write_text(_STUB_GRADLEW)
+        gradlew.chmod(0o755)
+        self.results = self.proj / "build" / "test-results" / "test"
+
+    def tearDown(self):
+        self.tmp.cleanup()
+
+    def _run(self, *args, report="none", stub_exit=0):
+        env = {k: v for k, v in os.environ.items()
+               if not k.startswith(("JIG_GRADLE", "JIG_GRADLEW", "STUB_"))}
+        env.update(STUB_REPORT=report, STUB_EXIT=str(stub_exit))
+        return subprocess.run(["sh", "wrapper.sh", *args], cwd=self.proj,
+                              env=env, capture_output=True, text=True)
+
+    def _args(self):
+        return (self.proj / "gradlew.args").read_text().split()
+
+    def test_tests_pass_is_0(self):
+        self.assertEqual(self._run(report="pass").returncode, 0)
+
+    def test_failure_and_error_reports_are_1(self):
+        for report in ("fail", "error"):
+            with self.subTest(report=report):
+                r = self._run(report=report, stub_exit=1)
+                self.assertEqual(r.returncode, 1, r.stderr)
+
+    def test_build_failure_with_no_report_is_2(self):
+        r = self._run(report="none", stub_exit=1)
+        self.assertEqual(r.returncode, 2)
+        self.assertIn("no JUnit report", r.stderr)
+
+    def test_gradle_failure_with_clean_reports_is_2(self):
+        r = self._run(report="pass", stub_exit=1)
+        self.assertEqual(r.returncode, 2)
+        self.assertIn("no test failed", r.stderr)
+
+    def test_exit_0_with_no_report_is_2(self):
+        # The task was skipped (up to date) or filtered to nothing.
+        self.assertEqual(self._run(report="none", stub_exit=0).returncode, 2)
+
+    def test_exit_0_with_no_test_case_is_2(self):
+        r = self._run(report="empty", stub_exit=0)
+        self.assertEqual(r.returncode, 2)
+        self.assertIn("no test ran", r.stderr)
+
+    def test_selector_is_mapped_to_tests_filter(self):
+        self._run("pkg.Class::method", report="pass")
+        self.assertEqual(self._args(), ["test", "--tests", "pkg.Class.method"])
+        self._run(report="pass")
+        self.assertEqual(self._args(), ["test"])
+
+    def test_stale_failing_report_is_deleted_before_the_run(self):
+        self.results.mkdir(parents=True)
+        (self.results / "TEST-old.xml").write_text(
+            '<testsuite><testcase name="o"><failure/></testcase></testsuite>')
+        # A passing run must not be turned red by the earlier report...
+        self.assertEqual(self._run(report="pass").returncode, 0)
+        self.assertFalse((self.results / "TEST-old.xml").exists())
+        # ...and a run that writes nothing must not be vouched for by it.
+        (self.results / "TEST-old.xml").write_text(
+            '<testsuite><testcase name="o"/></testsuite>')
+        self.assertEqual(self._run(report="none").returncode, 2)
+
+    def test_missing_gradlew_is_2(self):
+        (self.proj / "gradlew").unlink()
+        r = self._run()
+        self.assertEqual(r.returncode, 2)
+        self.assertIn("not found", r.stderr)
+
+    def test_wrapper_under_tdd_py_end_to_end(self):
+        # The recipe wired through .jig/test-command and the real tdd.py.
+        _write(self.proj / ".jig" / "test-command", "sh wrapper.sh {test}\n")
+        for report, stub_exit, want in (("pass", 0, 0), ("fail", 1, 1),
+                                        ("none", 1, 2)):
+            with self.subTest(report=report):
+                env = os.environ.copy()
+                env.update(STUB_REPORT=report, STUB_EXIT=str(stub_exit))
+                r = subprocess.run(
+                    [sys.executable, str(TDD_PY), "run", str(self.proj),
+                     "--test", "pkg.Class::method"],
+                    capture_output=True, text=True, env=env)
+                self.assertEqual(r.returncode, want, r.stdout + r.stderr)
+
+    def test_skill_md_states_the_closed_list_policy(self):
+        # AC4.
+        text = SKILL_MD.read_text()
+        self.assertIn("The built-in list is closed", text)
+        self.assertIn("does not add an adapter per test framework", text)
+        self.assertIn("(test-command-recipes.md)", text)
+        self.assertNotIn("rspec / `go test` / `cargo test`\n  detection, AC",
+                         text)
+        self.assertNotRegex(text, r"Out of scope for slice 006-01:\*\* rspec")
+
+    def test_document_states_the_limits(self):
+        text = RECIPES_MD.read_text()
+        for needle in ("ADR-0068", "not a catalogue",
+                       "has not run this against real Gradle",
+                       "instrumented tests", "out of scope for jig",
+                       "does not ship or run it", ":app:testDebugUnitTest",
+                       "|| exit 1"):
+            self.assertIn(needle, text)
 
 
 if __name__ == "__main__":
