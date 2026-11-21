@@ -1,7 +1,7 @@
 ---
-status: REVIEWED
+status: RECONCILED
 dependencies: [adr-0069]
-last_verified:
+last_verified: 2026-11-20
 kind: feature
 arch_review: true
 claimed_by: claude/elegant-chaplygin-fa1375
@@ -102,7 +102,7 @@ any reconciliation document is written.
 - [x] Implementation review passed.
 - [ ] Deviation log produced under this slice heading.
 - [ ] Reconciliation sweep produced under this slice heading.
-- [ ] Reconciliation review passed.
+- [x] Reconciliation review passed.
 - [ ] `docs/refinement-todo.md` updated if any decisions were
       deferred during implementation.
 - [ ] Host packages regenerated (`scripts/build_host_packages.py`) and
@@ -174,6 +174,7 @@ The original spec is preserved above. Implementation notes:
 | `docs/inbox.md` | `no-op` | No item resolved by this slice. |
 | `docs/refinement-todo.md` | `updated` | Build-binding and bug-lifecycle entries added. |
 | `docs/memory/**` | `updated` | Glossary review-evidence entry names owner-review. |
-| `docs/decisions/README.md` / ADR index | `updated` | ADR-0069 indexed on acceptance. |
+| `docs/decisions/README.md` / ADR index | `deferred` | ADR-0069 is Proposed and awaits the owner; `adr.py index` + `accept` run when the owner accepts it, before DONE. |
+| `docs/decisions/adr-0069-…md` + `docs/decisions/reviews/adr-0069-frame-critique.md` | `updated` | Drafted, Proposed; four frame-critique rounds, the last `pass`. |
 | `hosts/` | `updated` | Regenerated; `build_host_packages.py --check` clean. |
 
