@@ -365,7 +365,8 @@ SKILL.md hand-off is the documented gate.
    field`, `form field`, `animation`, `accessibility`, `a11y`, `screen
    reader`, `widget`, `navbar`, `tab bar`, `microcopy`, `real device`.
    A false positive costs one question; if the list misses a slice the
-   owner wants to try, set the flag by hand.
+   owner wants to try, set the flag by hand. A hyphen counts as a word
+   boundary, so `UI-related` matches `ui` and `tap-to-pay` matches `tap`.
 5b. **Behavioral rules (optional, spec 118).** For stateful or role-dependent
    work, use the slice template's table to name operation/control, actor,
    state/precondition, outcome, rationale, and owning AC. Omit it when it adds
