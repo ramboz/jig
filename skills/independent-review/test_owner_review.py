@@ -185,7 +185,8 @@ class ReopenBatchTests(OwnerReviewBase):
         self.assertEqual(r.returncode, 0, r.stderr)
         self.assertIn("review_reopened_at: ", self.slice_text())
         self.assertIn("ask the owner again", r.stdout)
-        self.assertIn("re-run every review pass", r.stdout)
+        self.assertIn("re-run every review pass (compliance, craft, "
+                      "owner-review)", r.stdout)
         check = run_review("check-reviews", str(self.spec), "900-01")
         self.assertEqual(check.returncode, 2)
         stale = [ln for ln in check.stderr.splitlines()
@@ -215,6 +216,29 @@ class ReopenBatchTests(OwnerReviewBase):
         ask = run_review("owner-review", str(self.spec), "900-01")
         self.assertEqual(ask.returncode, 0, ask.stderr)
         self.assertEqual(self.record().returncode, 0)
+        check = run_review("check-reviews", str(self.spec), "900-01")
+        self.assertEqual(check.returncode, 0, check.stderr)
+
+    def test_rerunning_the_ask_after_recording_does_not_turn_an_old_reply_green(self):
+        # Frame-critique round 3: old reply recorded first (in good faith),
+        # then the gate's own remedy (re-run the ask) must not make it clear
+        # before the owner answers the new ask.
+        path = self.spec.parent / "slice-01-entry.md"
+        path.write_text(path.read_text().replace(
+            "owner_review: true\n",
+            "owner_review: true\n"
+            "owner_review_asked_at: 2026-01-01T00:00:00Z\n"
+            "review_reopened_at: 2026-01-02T00:00:00Z\n"))
+        self.record_other("compliance", "pass")
+        self.record_other("craft", "pass")
+        self.assertEqual(self.record().returncode, 0)  # old reply, after R
+        import time
+        time.sleep(1.1)
+        run_review("owner-review", str(self.spec), "900-01")  # re-ask
+        check = run_review("check-reviews", str(self.spec), "900-01")
+        self.assertEqual(check.returncode, 2, check.stdout)
+        self.assertIn("a new answer is pending", check.stderr)
+        self.assertEqual(self.record().returncode, 0)  # the new answer
         check = run_review("check-reviews", str(self.spec), "900-01")
         self.assertEqual(check.returncode, 0, check.stderr)
 

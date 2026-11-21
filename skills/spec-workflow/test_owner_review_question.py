@@ -75,6 +75,10 @@ class StatusTests(Base):
             self.write_slice(UI_BODY, f"owner_review: {value}\n")
             self.assertEqual(self.status().split()[0], "declined", value)
 
+    def test_an_empty_value_counts_as_not_asked(self):
+        self.write_slice(UI_BODY, "owner_review:\n")
+        self.assertEqual(self.status().split()[0], "ask")
+
     def test_absent_flag_on_a_ui_slice_asks_and_gives_the_reason(self):
         self.write_slice(UI_BODY)
         out = self.status()
@@ -93,6 +97,8 @@ class StatusTests(Base):
         self.assertEqual(out.split()[0], "ask")
         self.assertIn("design_review", out)
         self.assertIn("recommended answer: yes", out.lower())
+        # The recommendation comes after the question, not mid-sentence.
+        self.assertNotIn("screen), and", out)
 
     def test_design_review_never_sets_the_flag(self):
         self.write_slice(PLAIN_BODY, "design_review: true\n")
@@ -119,6 +125,11 @@ class UiRuleTests(unittest.TestCase):
     def test_terms_live_in_one_tuple(self):
         self.assertIsInstance(workflow.OWNER_REVIEW_UI_TERMS, tuple)
         self.assertIn("button", workflow.OWNER_REVIEW_UI_TERMS)
+
+    def test_multi_word_terms_match_across_a_line_wrap(self):
+        self.assertEqual(
+            self.signals("**Goal:** a new user\ninterface with dark\nmode.\n"),
+            ["user interface", "dark mode"])
 
     def test_whole_words_case_insensitive_with_plural(self):
         self.assertEqual(self.signals("**Goal:** Two BUTTONS.\n"), ["button"])
@@ -212,6 +223,13 @@ class SessionPlanTests(Base):
         self.assertEqual(
             re.findall(r"^\s+\d+\. ([a-z-]+) — ", out, re.MULTILINE),
             ["implement", "compliance", "craft", "reconcile", "land"])
+
+    def test_design_review_line_recommends_yes(self):
+        self.write_slice(PLAIN_BODY, "design_review: true\n")
+        line = next(ln for ln in self.plan().splitlines()
+                    if "NOT ASKED YET" in ln)
+        self.assertIn("Recommended answer: yes", line)
+        self.assertIn("Do not answer for them", line)
 
     def test_answered_or_non_ui_slices_get_no_line(self):
         for body, extra in ((UI_BODY, "owner_review: false\n"),

@@ -72,9 +72,7 @@ PASSES = ("compliance", "craft", "arch", "code-health", "reconciliation",
           "frame-critique", "design-review", "bug-review", "security",
           "owner-review")
 
-# The passes that gate REVIEWED for a slice (always-on + flag-gated).
-REVIEWED_STAGE_PASSES = ("compliance", "craft", "arch", "code-health",
-                         "design-review", "owner-review")
+
 
 # ADR-0014 §3: allowed verdict values.
 VERDICTS = ("pass", "fail", "needs-changes")
@@ -317,6 +315,13 @@ def required_passes(stage: str, *, arch_review: bool,
         f"unknown transition stage '{stage}'; expected READY_FOR_REVIEW, "
         f"REVIEWED or RECONCILED"
     )
+
+
+# Every pass that can gate REVIEWED (always-on + each flag-gated one),
+# derived from the map above so a new REVIEWED pass cannot be missed.
+REVIEWED_STAGE_PASSES = required_passes(
+    "REVIEWED", arch_review=True, code_health_review=True,
+    design_review=True, owner_review=True)
 
 
 def required_bug_passes(stage: str, *, security_surface: bool = False) -> tuple:
@@ -657,6 +662,22 @@ def _owner_review_flag(spec_path, slice_fragment: str) -> bool:
     return _review_flag(spec_path, slice_fragment, "owner_review")
 
 
+def owner_review_required(spec_path, slice_fragment: str) -> bool:
+    """Public reader of the `owner_review:` flag for other modules
+    (review.py). Raises `EvidenceError` when the slice can't be resolved."""
+    return _owner_review_flag(spec_path, slice_fragment)
+
+
+def reviewed_passes_for(spec_path, slice_fragment: str) -> tuple:
+    """The REVIEWED-stage passes this slice's flags require."""
+    return required_passes(
+        "REVIEWED",
+        arch_review=_arch_review_flag(spec_path, slice_fragment),
+        code_health_review=_code_health_review_flag(spec_path, slice_fragment),
+        design_review=_design_review_flag(spec_path, slice_fragment),
+        owner_review=_owner_review_flag(spec_path, slice_fragment))
+
+
 # ---------------------------------------------------------------------------
 # Spec 124-01 / ADR-0069: the owner-review pass — a verdict whose author is
 # a person. The record body carries what the owner tried, on what surface,
@@ -671,6 +692,25 @@ OWNER_REVIEW_PASS = "owner-review"
 # was asked again AFTER the reopen — a reply that arrives late but answers
 # the earlier ask is about the earlier build (ADR-0069 decision 6).
 OWNER_ASKED_FIELD = "owner_review_asked_at"
+
+
+def owner_answer_predates_ask_problem(reviewed_at, asked_at) -> str:
+    """Return a problem when the owner verdict was recorded before the most
+    recent ask, else "". Re-running the ask means a new answer is pending,
+    so the standing one stops clearing until it is recorded (fail closed).
+    No ask stamp → no requirement (the flag was set by hand or the ask
+    command was never run)."""
+    if not str(asked_at or "").strip():
+        return ""
+    asked = _parse_iso8601(asked_at)
+    reviewed = _parse_iso8601(reviewed_at)
+    # Same-second ask-then-record is the normal flow, so "not older".
+    if asked is not None and reviewed is not None and reviewed >= asked:
+        return ""
+    return (f"this answer (reviewed_at {reviewed_at or '(empty)'}) was "
+            f"recorded before the owner was last asked "
+            f"({OWNER_ASKED_FIELD} {asked_at}) — a new answer is pending. "
+            "Record the owner's reply to that ask")
 
 
 def owner_ask_stale_problem(asked_at, reopened_at) -> str:
@@ -844,9 +884,12 @@ def validate_evidence(spec_path, slice_fragment: str, stage: str) -> list:
                         problems.append(freshness)
             if pass_name == OWNER_REVIEW_PASS:
                 if not stale:
-                    late = owner_ask_stale_problem(
-                        _slice_field(spec_path, slice_fragment,
-                                     OWNER_ASKED_FIELD), reopened_at)
+                    asked_at = _slice_field(spec_path, slice_fragment,
+                                            OWNER_ASKED_FIELD)
+                    late = (owner_ask_stale_problem(asked_at, reopened_at)
+                            or owner_answer_predates_ask_problem(
+                                rec.fields.get("reviewed_at", ""),
+                                asked_at))
                     if late:
                         problems.append(late)
                 try:

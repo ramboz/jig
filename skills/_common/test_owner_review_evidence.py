@@ -62,6 +62,12 @@ class VocabularyTests(unittest.TestCase):
         self.assertNotIn(
             "owner-review", ev.required_passes("REVIEWED", arch_review=False))
 
+    def test_reviewed_stage_passes_cover_every_flag(self):
+        self.assertEqual(
+            set(ev.REVIEWED_STAGE_PASSES),
+            {"compliance", "craft", "arch", "code-health", "design-review",
+             "owner-review"})
+
     def test_other_stages_ignore_the_flag(self):
         self.assertEqual(
             ev.required_passes("RECONCILED", arch_review=False,

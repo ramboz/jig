@@ -162,10 +162,16 @@ records it and settles the details.
    reply can arrive after the stamp and still be about the build from
    before the fix. The ask is therefore recorded too. `review.py
    owner-review` stamps `owner_review_asked_at` on the slice each time it
-   is run, and once a reopen stamp exists an owner verdict clears only if
-   the owner was asked again after it. A late reply to the earlier ask
-   does not clear; the agent has to run the ask again, which is the moment
-   it tells the owner what changed.
+   is run. An owner verdict clears only if it was recorded no earlier than
+   the most recent ask, and, once a reopen stamp exists, only if that ask
+   came after the reopen (`review_reopened_at` < `owner_review_asked_at`
+   <= `reviewed_at`). A late reply to the earlier ask does not clear, and
+   running the ask again does not turn an already-recorded old reply
+   green: re-running the ask means a new answer is pending, so the
+   standing one stops clearing until the owner's reply to the new ask is
+   recorded. The ask is the moment the agent tells the owner what
+   changed. The ask command therefore has a side effect: run it only when
+   actually asking.
 
    Limits, stated plainly. The rule applies to flagged slices only; other
    slices keep today's behaviour (re-run only the pass that failed). It
@@ -175,7 +181,10 @@ records it and settles the details.
    It does not catch a change made with no rejection at all (general
    code-staleness stays deferred, ADR-0014 Scope); for that case the ask
    and the docs state the rule: if the build changes after the owner was
-   asked, ask again. Re-running the ask and then recording an old reply
+   asked, ask again. The ask stamp records when the command ran, not which
+   build was offered, so running it before the fix exists and recording a
+   prompt reply about the unfixed build also clears; the ask text says to
+   ask after the fix. Re-running the ask and then recording an old reply
    defeats it, as writing the file by hand does; like the rest of this
    gate it makes that a deliberate act, not an accident (decision 3).
 
