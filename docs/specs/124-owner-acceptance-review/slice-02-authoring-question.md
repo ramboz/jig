@@ -1,8 +1,9 @@
 ---
-status: READY_FOR_IMPLEMENTATION
+status: IN_PROGRESS
 dependencies: [124-01]
 last_verified:
 kind: feature
+claimed_by: claude/elegant-chaplygin-fa1375
 ---
 
 <!-- jig self-defining vocabulary (soft, forward-only): expand each acronym on

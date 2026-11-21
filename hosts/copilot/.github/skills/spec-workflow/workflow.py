@@ -365,6 +365,120 @@ def slice_needs_design_review(spec_path, slice_fragment: str) -> bool:
     return frontmatter_flag_truthy(fields.get("design_review", ""))
 
 
+def slice_needs_owner_review(spec_path, slice_fragment: str) -> bool:
+    """Return True iff the slice's frontmatter declares `owner_review: true`
+    (spec 124-01 / ADR-0069; mirrors `slice_needs_arch_review`).
+
+    The owner-review pass is the one pass a person answers: the owner tries
+    the slice and their quoted answer is recorded. Same shared truthy
+    predicate as the gate's reader (`review_evidence._owner_review_flag`).
+    Defaults to False on any miss; raises WorkflowError on lookup failures.
+    """
+    loc = load_slice(spec_path, slice_fragment)
+    fields, _ = _slice_frontmatter(loc.text[loc.start:loc.end])
+    return frontmatter_flag_truthy(fields.get("owner_review", ""))
+
+
+# ---------- owner-review authoring question (spec 124-02 / ADR-0069) ------
+#
+# `owner_review` has three readings: truthy (the pass is required), present
+# with any other value (the owner was asked and said no), and ABSENT (nobody
+# has asked). An absent flag on a UI-related slice is the state a careless
+# author leaves behind, so jig asks: at authoring time (SKILL.md step 5a-2),
+# as a note on forward transitions, and in `session-plan`.
+#
+# "UI-related" is deliberately cheap and stated: the slice sets
+# `design_review: true`, or its title / goal / DoR / acceptance criteria
+# contain one of these terms (whole words, case-insensitive, optional plural
+# `s`). A false positive costs one question, answered once with
+# `owner_review: false`; a false negative is covered by setting the flag by
+# hand. The same list is printed in SKILL.md (pinned by a test).
+OWNER_REVIEW_UI_TERMS = (
+    "ui", "ux", "gui", "user interface", "screen", "button", "dialog",
+    "modal", "mockup", "wireframe", "css", "stylesheet", "frontend",
+    "front-end", "tap", "click", "swipe", "responsive", "viewport",
+    "dark mode", "tooltip", "toast", "dropdown", "checkbox", "text field",
+    "input field", "form field", "animation", "accessibility", "a11y",
+    "screen reader", "widget", "navbar", "tab bar", "microcopy",
+    "real device",
+)
+
+_OWNER_REVIEW_UI_RE = re.compile(
+    r"(?<!\w)(" + "|".join(re.escape(term) for term in OWNER_REVIEW_UI_TERMS)
+    + r")s?(?!\w)", re.IGNORECASE)
+_HTML_COMMENT_RE = re.compile(r"<!--.*?-->", re.DOTALL)
+# Where the scanned part of a slice ends: the first `###` subsection or the
+# DoD. Later sections (the template's optional scenario text, DoD
+# boilerplate, logs) say nothing about what the slice ships.
+_OWNER_REVIEW_SCAN_END_RE = re.compile(
+    r"(?m)^(?:###\s|\*\*(?:DoD|Definition of Done)\b)")
+
+# Forward transitions on which an unanswered UI-related slice gets the note.
+_OWNER_REVIEW_NOTE_STATES = (
+    "READY_FOR_REVIEW", "READY_FOR_IMPLEMENTATION", "IN_PROGRESS", "REVIEWED")
+
+
+def owner_review_ui_signals(section: str) -> list:
+    """Return the `OWNER_REVIEW_UI_TERMS` found in a slice's title, goal,
+    DoR and acceptance criteria (first-seen order, lower-cased, deduped).
+    Frontmatter, HTML comments and everything from the first `###`
+    subsection or the DoD onward are not scanned."""
+    _fields, consumed = _slice_frontmatter(section)
+    body = _HTML_COMMENT_RE.sub(" ", section[consumed:])
+    end = _OWNER_REVIEW_SCAN_END_RE.search(body)
+    if end:
+        body = body[:end.start()]
+    found: list = []
+    for match in _OWNER_REVIEW_UI_RE.finditer(body):
+        term = " ".join(match.group(1).lower().split())
+        if term not in found:
+            found.append(term)
+    return found
+
+
+def owner_review_status(section: str) -> tuple:
+    """Classify a slice section for the owner-review question.
+
+    Returns ``(classification, detail)``; classification is one of
+    `required` (flag truthy), `declined` (flag present, any other value),
+    `ask` (flag absent and the slice is UI-related) or `not-applicable`
+    (flag absent, not UI-related). A slice with no frontmatter has nowhere
+    to carry an answer and is `not-applicable`."""
+    fields, _ = _slice_frontmatter(section)
+    if "owner_review" in fields:
+        value = str(fields.get("owner_review") or "").strip()
+        if frontmatter_flag_truthy(value):
+            return "required", f"owner_review: {value}"
+        return "declined", f"owner_review: {value or '(empty)'}"
+    if not fields:
+        return "not-applicable", "the slice has no frontmatter"
+    design = frontmatter_flag_truthy(fields.get("design_review", ""))
+    signals = owner_review_ui_signals(section)
+    if not design and not signals:
+        return ("not-applicable",
+                "owner_review is not set and the slice does not look "
+                "UI-related")
+    reasons = []
+    if design:
+        reasons.append("it sets design_review: true")
+    if signals:
+        reasons.append("it mentions " + ", ".join(signals))
+    detail = "the slice looks UI-related (" + "; ".join(reasons) + ")"
+    if design:
+        detail += ". Recommended answer: yes (the slice ships a screen)"
+    return "ask", detail
+
+
+def _owner_review_question(label: str, detail: str) -> str:
+    """The shared wording of the question (transition note + CLI)."""
+    return (
+        f"slice {label}: {detail}, and `owner_review` has no answer yet. "
+        "Ask the owner whether they want to try this slice themselves "
+        "before it is reconciled, then write `owner_review: true` (yes) or "
+        "`owner_review: false` (no) in the slice frontmatter. Do not answer "
+        "for them.")
+
+
 # ---------- derived frame_review trigger (slice 064-04 / ADR-0020) ----------
 
 # A `## Assumptions` bullet/line that is a placeholder rather than a real
@@ -505,6 +619,8 @@ def derive_frame_review(spec_path, slice_fragment: str) -> bool:
 # inserted after the code-health phase and before reconcile.
 _SESSION_PLAN_PHASES = (
     ("implement", "delegate", "implementer", None),
+    # owner-review (conditional, spec 124-01) inserted here: asked first so
+    # the owner tries the slice while the automated passes run.
     ("compliance", "delegate", "reviewer", "jig:independent-review"),
     ("craft", "delegate", "reviewer", "pr-review"),
     # arch + code-health (both conditional) inserted here, in that order.
@@ -540,6 +656,14 @@ _SESSION_PLAN_CODE_HEALTH_PHASE = (
 _SESSION_PLAN_DESIGN_REVIEW_PHASE = (
     "design-review", "delegate", "reviewer", "jig:independent-review")
 
+# The conditional owner-review phase (spec 124-01 / ADR-0069). A person
+# answers it, so it is neither delegated nor an orchestrator step: the
+# orchestrator ASKS, right after `implement`, and carries on with the
+# automated passes while it waits.
+_SESSION_PLAN_OWNER_REVIEW_PHASE = (
+    "owner-review", "owner", None, "jig:independent-review")
+_SESSION_PLAN_OWNER_AFTER = "implement"
+
 # Slice 074-02: host-mode hints are advisory UX guidance, not lifecycle
 # state. Keep the values host-neutral so adapters can map them to Claude,
 # Codex, or another host without changing jig transition semantics.
@@ -551,6 +675,7 @@ _SESSION_PLAN_HOST_MODE_HINTS = {
     "arch": "review",
     "code-health": "review",
     "design-review": "review",
+    "owner-review": "review",
     "reconcile": "reconcile",
     "land": "land",
 }
@@ -616,8 +741,11 @@ def session_plan(spec_path: Path) -> str:
             fm_fields.get("code_health_review", ""))
         needs_design = frontmatter_flag_truthy(
             fm_fields.get("design_review", ""))
+        needs_owner = frontmatter_flag_truthy(
+            fm_fields.get("owner_review", ""))
+        owner_q = owner_review_status(section)
         planned.append((loc.label, needs_frame, needs_arch, needs_code_health,
-                        needs_design))
+                        needs_design, needs_owner, owner_q))
 
     lines = []
     lines.append(f"# Session plan — {spec_path}")
@@ -656,6 +784,8 @@ def session_plan(spec_path: Path) -> str:
     def _render_phase(step, phase, mode, actor, skill, note=""):
         if mode == "delegate":
             head = f"DELEGATE to [{actor}] subagent"
+        elif mode == "owner":
+            head = "WAITING ON THE OWNER (ask now; a person answers)"
         else:  # dispatch — orchestrator's own loop
             head = "ORCHESTRATOR step"
         if skill:
@@ -667,10 +797,18 @@ def session_plan(spec_path: Path) -> str:
             line += f"  {note}"
         return line
 
-    for label, needs_frame, needs_arch, needs_code_health, needs_design \
-            in planned:
+    for (label, needs_frame, needs_arch, needs_code_health, needs_design,
+         needs_owner, owner_q) in planned:
         lines.append(f"## Slice {label}")
         lines.append("")
+        if owner_q[0] == "ask":
+            # Spec 124-02: nobody has said whether the owner wants to try
+            # this UI-related slice. Not a phase — a question to settle.
+            lines.append(
+                f"  ! owner_review — NOT ASKED YET: {owner_q[1]}. Ask the "
+                "owner whether they want to try this slice before it is "
+                "reconciled and set the flag to true or false "
+                "(`workflow.py owner-review-status`).")
         step = 1
         # Slice 064-04: the conditional frame-critique phase is emitted FIRST,
         # before `implement` — it gates DRAFT → READY_FOR_REVIEW (pre-impl).
@@ -684,6 +822,17 @@ def session_plan(spec_path: Path) -> str:
         for phase, mode, actor, skill in _SESSION_PLAN_PHASES:
             lines.append(_render_phase(step, phase, mode, actor, skill))
             step += 1
+            if phase == _SESSION_PLAN_OWNER_AFTER and needs_owner:
+                ophase, omode, oactor, oskill = \
+                    _SESSION_PLAN_OWNER_REVIEW_PHASE
+                lines.append(_render_phase(
+                    step, ophase, omode, oactor, oskill,
+                    note="(slice declares owner_review: true — run "
+                         "`review.py owner-review` and ask the owner, in "
+                         "parallel with the review passes below; REVIEWED "
+                         "waits for their recorded answer; do not start "
+                         "reconcile before it)"))
+                step += 1
             if phase == _SESSION_PLAN_ARCH_AFTER:
                 # arch first (when declared), then code-health, then
                 # design-review — all conditional, all slotted between
@@ -1342,6 +1491,15 @@ def transition(spec_md: Path, slice_fragment: str, new_status: str, *,
             _project_root_for_spec(spec_md), loc.label, new_status,
             reopen=reopen,
         )
+
+    # Spec 124-02: the careless path still gets the owner-review question.
+    # Non-blocking, and silent once the flag has any value.
+    if new_status in _OWNER_REVIEW_NOTE_STATES and not release:
+        owner_class, owner_detail = owner_review_status(section)
+        if owner_class == "ask":
+            sys.stderr.write(
+                "note: " + _owner_review_question(loc.label, owner_detail)
+                + "\n")
 
     if new_status in {"REVIEWED", "RECONCILED"}:
         freshness_warning = _branch_freshness_warning(
@@ -6010,6 +6168,25 @@ def _build_parser() -> argparse.ArgumentParser:
     pdr.add_argument("slice",
                      help="slice name or fragment (case-insensitive substring)")
 
+    # Spec 124-01: owner-review-pass gating mirror of arch-review-needed.
+    powr = sub.add_parser(
+        "owner-review-needed",
+        help="print 'true' if the named slice's frontmatter declares "
+             "`owner_review: true`; 'false' otherwise (spec 124-01)",
+    )
+    powr.add_argument("spec", help="path to spec.md")
+    powr.add_argument("slice", help="slice name or fragment")
+
+    # Spec 124-02: classify a slice for the owner-review authoring question.
+    pows = sub.add_parser(
+        "owner-review-status",
+        help="print whether the owner-review question is settled for a "
+             "slice: required / declined / ask / not-applicable "
+             "(spec 124-02)",
+    )
+    pows.add_argument("spec", help="path to spec.md")
+    pows.add_argument("slice", help="slice name or fragment")
+
     # Slice 064-04: DERIVE (not read) whether the frame-critique pass should
     # fire — the mechanical ADR-0020 trigger (ADRs always-on; specs iff the
     # `## Assumptions` section carries >=1 real assumption). Mirrors
@@ -6140,6 +6317,16 @@ def main(argv: list) -> int:
             sys.stdout.write("true\n" if needed else "false\n")
         elif ns.command == "code-health-review-needed":
             needed = slice_needs_code_health_review(Path(ns.spec), ns.slice)
+            sys.stdout.write("true\n" if needed else "false\n")
+        elif ns.command == "owner-review-status":
+            loc = load_slice(Path(ns.spec), ns.slice)
+            owner_class, owner_detail = owner_review_status(
+                loc.text[loc.start:loc.end])
+            if owner_class == "ask":
+                owner_detail = _owner_review_question(loc.label, owner_detail)
+            sys.stdout.write(f"{owner_class} — {owner_detail}\n")
+        elif ns.command == "owner-review-needed":
+            needed = slice_needs_owner_review(Path(ns.spec), ns.slice)
             sys.stdout.write("true\n" if needed else "false\n")
         elif ns.command == "design-review-needed":
             needed = slice_needs_design_review(Path(ns.spec), ns.slice)

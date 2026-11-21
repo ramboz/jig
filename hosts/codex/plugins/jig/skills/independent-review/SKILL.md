@@ -63,6 +63,12 @@ every slice may run:
   threshold and the results ledger), since the reviewer can only attest a
   verdict it can locate; with no pointer it has nothing to read and records
   a `fail`.
+- **Owner-review (a person answers — on-demand)** — spec 124-01 /
+  ADR-0069. When the slice declares `owner_review: true`
+  (`workflow.py owner-review-needed`), the owner tries the slice and their
+  quoted answer is recorded as the `owner-review` pass. No reviewer
+  subagent; the orchestrator asks, straight after implementation and in
+  parallel with the passes above. Gates REVIEWED like arch.
 - **Reconciliation review** — after the deviation log is written. The
   reviewer verifies the doc changes match reality; does NOT re-review the ACs.
 
@@ -303,6 +309,65 @@ the pass attests jig's own eval evidence. First consumer: food-log slice 002-01
 > derivation (unlike `frame_review`, which slice 064-04 derives from the spec's
 > grounding). Once set, `workflow.py session-plan` surfaces the pass on the
 > dispatch plan so it isn't a dead loop.
+
+### Owner-review (a person answers — spec 124-01 / ADR-0069, on-demand)
+
+The one pass without a reviewer subagent. It runs only when the slice
+declares `owner_review: true`, and it exists so the owner's hands-on check
+happens with the review batch, before reconciliation — not in the DoD
+after `RECONCILED`, where a rejection means redoing the deviation log, the
+sweep and the decision records.
+
+```bash
+python3 "${PLUGIN_ROOT}/skills/independent-review/review.py" \
+  owner-review "docs/specs/NNN-<slug>/spec.md" "<slice-fragment>"
+```
+
+This prints what to ask — it is not a subagent prompt. Run it as soon as
+implementation is finished, tell the owner how to get the build, put the
+question to them, and keep running the automated passes while they try
+it. Then record their reply:
+
+```bash
+python3 "${PLUGIN_ROOT}/skills/independent-review/review.py" \
+  record-review "docs/specs/NNN-<slug>/spec.md" "<slice-fragment>" \
+  --pass owner-review --verdict pass|needs-changes \
+  --reviewer "<the owner's name or handle>" \
+  --prompt-source "review.py owner-review <spec> <slice-fragment>" \
+  --tried "<what they tried>" --surface "<device or surface>" \
+  --owner-quote "<their reply, word for word>"
+```
+
+`--tried`, `--surface` and `--owner-quote` are required for this pass and
+refused on any other; `--summary-file` is optional notes. The gate
+re-checks that the record carries a `TRIED:`, a `SURFACE:` and an
+`OWNER SAID:` quote. Show the owner the recorded file afterwards.
+
+Rules for the orchestrator:
+
+- **Never infer the verdict.** Record only the owner's reply to the
+  question, quoted. Silence, an earlier general approval, a reply about
+  something else, and your own run of the feature are not answers. A reply
+  given in a later session is recorded from the owner's own message there,
+  never from an agent's notes.
+- **No person, no record.** In an unattended run nothing is recorded and
+  the slice waits; `record-review` refuses `--non-interactive` for this
+  pass.
+- **A rejection keeps the slice `IN_PROGRESS`.** Do not start
+  reconciliation. Fix, re-run the automated passes, ask again.
+- **One rejection reopens the batch.** On an `owner_review: true` slice,
+  recording a non-`pass` verdict for any REVIEWED-stage pass stamps
+  `review_reopened_at`; verdicts recorded before it stop clearing, the
+  owner's included. So record every rejection before fixing it — do not
+  just fix and re-run. The ask command stamps `owner_review_asked_at`, and
+  after a reopen the owner's verdict clears only if they were asked again
+  afterwards: a late reply to the earlier ask is about the earlier build.
+  If the build changes after the owner was asked for any other reason, ask
+  again and say what changed.
+
+The record is a deliberateness signal, not proof that a person tried
+anything: an agent can write the file (ADR-0011). It puts the owner's
+quoted answer in the diff, where the owner can read and contradict it.
 
 ### Reconciliation review
 
