@@ -1,0 +1,123 @@
+---
+status: DRAFT
+dependencies: [adr-0068, adr-0051]
+last_verified: 2026-11-21
+kind: feature
+---
+
+<!-- jig self-defining vocabulary (soft, forward-only): expand each acronym on
+     first use and link the term to docs/memory/glossary.md (or jig's lexicon).
+     See docs/workflow.md "Self-defining vocabulary". -->
+
+<!-- jig grounding (spec 064-02 / ADR-0020): ground factual claims about
+     runnable surfaces by probe first (run it / read source) or a citation,
+     else mark them as assumptions in the spec's `## Assumptions` section —
+     never assert an unverified claim as fact. -->
+
+## Slice 123-01 — dogfood-governance-plane
+
+**Goal:** jig carries the same governance plane `scaffold-init` writes for
+adopters (`CODEOWNERS`, `.github/workflows/jig-governance.yml`,
+`docs/governance.md`, and `scaffold.json.protected_paths`), rendered by
+`governance.py` rather than written by hand and pinned against drift, so jig's
+own PRs get the protected-path signal its adopters get.
+
+**Decision:** spec 123 D4. jig's copy stays **inert until branch protection is
+armed** (ADR-0051), and arming is the owner's decision, not this slice's.
+
+**DoR:**
+- ✅ ADR-0068 Accepted (spec preamble).
+- ✅ `governance.render_codeowners(owner=...)`, `render_governance_workflow()` and
+  `render_governance_doc()` exist (`skills/scaffold-init/governance.py:140`,
+  `:168`, `:243`); the CLI exposes `render-codeowners` / `render-workflow` /
+  `render-doc` but no owner flag (`governance.py:468-470`).
+- ⬜ The owner confirms the GitHub handle (or team) to name in jig's `CODEOWNERS`
+  (the repo is `ramboz/jig`). It must be a human owner, not the identity Claude
+  sessions push with (ADR-0051 §4).
+
+**Assumptions:** spec "jig-specific" assumption (nudge noise). Also unverified:
+which account opens PRs from Claude sessions on jig. If it is the owner's,
+"Require review from Code Owners" would be unsatisfiable for those PRs (GitHub
+blocks self-approval, ADR-0051 Context) — one more reason arming is out of scope.
+
+**Acceptance Criteria:**
+
+1. **`--owner` on the CLI.** `governance.py render-codeowners --owner <handle>`
+   prints `render_codeowners(owner=<handle>)`; without the flag the output is
+   unchanged (`@OWNER`). An owner value that is not `@user`, `@org/team` or an
+   email is refused with exit 2.
+2. **jig's three files are the renderer's output.** jig's root `CODEOWNERS`,
+   `.github/workflows/jig-governance.yml` and `docs/governance.md` are
+   byte-identical to `render-codeowners --owner <handle>`, `render-workflow` and
+   `render-doc`. A test in jig's suite (source-repo only, like
+   `JigSelfHostDogfoodTests` in `skills/_common/test_scaffold_state.py:275`)
+   fails, naming the file and the regenerate command, when any of the three
+   drifts from the renderer. The handle is read from jig's own `CODEOWNERS`, so
+   the test does not hard-code it.
+3. **jig's `scaffold.json` carries `protected_paths`.** The key equals
+   `list(governance.PROTECTED_PATHS)` and the drift test covers it. In a jig
+   session, an `Edit`/`Write` on a protected path now gets the
+   `jig-boundary-change-warn` nudge (`hooks/scripts/lib/protected_paths.py:126`);
+   `JIG_PROTECTED_PATHS=0` opts out. `JigSelfHostDogfoodTests` stays green.
+4. **Existing workflows untouched.** `ci.yml`, `pr-title.yml` and `release.yml`
+   are unchanged; `jig-governance` is a separate workflow.
+5. **No claim of enforcement.** Nothing this slice writes says jig's plane is
+   enforced. The owner's arming decision (whether, and for solo authorship, how)
+   is parked as one `memory.py add-inbox` entry that links ADR-0051's open
+   question on solo maintainers.
+
+**Edge cases to cover explicitly:**
+- A handle with a team slug (`@org/team`) renders verbatim.
+- The drift test fails on a one-character change to any of the four artifacts.
+- `docs/governance.md` lands under jig's docs root (`docs`, the default; jig's
+  `scaffold.json` sets no `layout.docs_root`).
+
+**DoD:**
+- [ ] All ACs pass; full test suite green (no regressions).
+- [ ] Implementer test coverage exercises each AC with at least one
+      fixture. Edge cases listed in the slice are covered explicitly.
+- [ ] Each new test has been shown to fail when its feature is removed —
+      the test is capable of failing, not vacuously green (mutate the
+      feature, watch the test go red, restore).
+- [ ] Host packages rebuilt with `scripts/build_host_packages.py` (the
+      `governance.py` CLI changed); drift guard green.
+- [ ] Reviewed by `reviewer` subagent. Reviewer prompt built by
+      `review.py`.
+- [ ] Implementation review passed.
+- [ ] Deviation log produced under this slice heading.
+- [ ] Reconciliation sweep produced under this slice heading.
+- [ ] Reconciliation review passed.
+- [ ] `docs/refinement-todo.md` updated if any decisions were
+      deferred during implementation.
+
+### Close-out (post-DONE)
+
+- [ ] `docs/specs/README.md` regenerated by `workflow.py status-board`.
+      Notes column receives any load-bearing per-slice invariant.
+- [ ] Primer hygiene per spec 025-01 rule (only if this slice closes the spec).
+
+**Anti-horizontal-phasing check:** after this slice, a jig PR that touches
+`docs/decisions/**`, `docs/conventions.md` or a workflow shows the same
+`jig-governance` result an adopter's PR shows, and jig sessions get the same
+in-boundary nudge, so jig sees its own noise rate first-hand.
+
+### Deviation log (after reconciliation)
+
+The original slice is preserved above. Implementation notes:
+
+_To be written at reconciliation._
+
+### Reconciliation sweep
+
+| Artifact | Disposition | Rationale |
+|----------|-------------|-----------|
+| `README.md` | `no-op` | _TODO at reconciliation._ |
+| `docs/specs/README.md` | `updated` | _TODO: regenerated by `workflow.py status-board`._ |
+| `docs/product-vision.md` | `no-op` | _TODO at reconciliation._ |
+| `docs/architecture.md` | `no-op` | _TODO: check the "Autonomy governance plane" section for a line saying jig runs its own plane._ |
+| Primer surfaces: `CLAUDE.md` / `AGENTS.md` / scaffold templates | `no-op` | _TODO at reconciliation._ |
+| `docs/inbox.md` | `updated` | _TODO: the arming-decision entry (AC5)._ |
+| `docs/refinement-todo.md` | `no-op` | _TODO at reconciliation._ |
+| `docs/memory/**` | `no-op` | _TODO at reconciliation._ |
+| `docs/decisions/README.md` / ADR index | `no-op` | _TODO at reconciliation._ |
+| Additional live prose / generated templates touched by this slice | `no-op` | _TODO at reconciliation._ |
