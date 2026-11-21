@@ -415,7 +415,7 @@ _HTML_COMMENT_RE = re.compile(r"<!--.*?-->", re.DOTALL)
 # DoD. Later sections (the template's optional scenario text, DoD
 # boilerplate, logs) say nothing about what the slice ships.
 _OWNER_REVIEW_SCAN_END_RE = re.compile(
-    r"(?m)^(?:###\s|\*\*(?:DoD|Definition of Done)\b)")
+    r"(?m)^(?:#{3,6}\s|\*\*(?:DoD|Definition of Done)\b)")
 
 # Forward transitions on which an unanswered UI-related slice gets the note.
 _OWNER_REVIEW_NOTE_STATES = (
@@ -620,7 +620,7 @@ def derive_frame_review(spec_path, slice_fragment: str) -> bool:
 # the named subagent + skill rather than doing the turn-heavy work itself.
 # Each phase is either DELEGATED to a subagent (runs in its own isolated
 # context) or an ORCHESTRATOR dispatch step (the orchestrator's own loop).
-# Fields: (phase, mode, actor, skill) where mode is "delegate"|"dispatch",
+# Fields: (phase, mode, actor, skill) where mode is "delegate"|"dispatch"|"owner",
 # `actor` is the subagent type for delegated phases (None for dispatch
 # steps the orchestrator drives itself), and `skill` is the jig skill the
 # phase runs (None when the phase has no skill — e.g. `implement`, which
@@ -678,7 +678,7 @@ _SESSION_PLAN_DESIGN_REVIEW_PHASE = (
 # orchestrator ASKS, right after `implement`, and carries on with the
 # automated passes while it waits.
 _SESSION_PLAN_OWNER_REVIEW_PHASE = (
-    "owner-review", "owner", None, "jig:independent-review")
+    "owner-review", "owner", None, None)
 _SESSION_PLAN_OWNER_AFTER = "implement"
 
 # Slice 074-02: host-mode hints are advisory UX guidance, not lifecycle
@@ -762,6 +762,8 @@ def session_plan(spec_path: Path) -> str:
         needs_owner = frontmatter_flag_truthy(
             fm_fields.get("owner_review", ""))
         owner_q = owner_review_status(section)
+        if status == "DONE":
+            owner_q = ("done", "")  # a finished slice is not asked
         section_by_label[loc.label] = section
         planned.append((loc.label, needs_frame, needs_arch, needs_code_health,
                         needs_design, needs_owner, owner_q))

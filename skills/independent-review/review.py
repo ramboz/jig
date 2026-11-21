@@ -2078,7 +2078,9 @@ def build_owner_review_ask(spec_path: Path, slice_label: str,
 
 This slice sets `owner_review: true`: the owner tries it themselves before
 it is reconciled. Running this command records on the slice that the owner
-is being asked now (`owner_review_asked_at`), so run it when you ask. This pass has no reviewer subagent. You ask the owner, a
+is being asked now (`owner_review_asked_at`), so run it when you ask.
+
+This pass has no reviewer subagent. You ask the owner, a
 person answers, and you record their words.
 
 ## When
@@ -2127,7 +2129,7 @@ What there is to try is the slice itself ({slice_path}):
 
 ```bash
 python3 review.py record-review {spec_path} {slice_fragment} \\
-  --pass owner-review --verdict pass|needs-changes \\
+  --pass owner-review --verdict <pass or needs-changes> \\
   --reviewer "<the owner's name or handle>" \\
   --prompt-source "review.py owner-review {spec_path} {slice_fragment}" \\
   --tried "<what they tried>" --surface "<device or surface>" \\
@@ -2275,7 +2277,10 @@ def record_review(args) -> int:
             sys.stdout.write(
                 f"STOP — slice {slice_label}: "
                 f"{_evidence.owner_rejection_guidance(args.slice)}\n")
-    if args.verdict != "pass":
+    if args.verdict != "pass" and not (
+            args.pass_name == "arch" and _evidence.escalations(body)):
+        # An escalated arch verdict waits on a person's decision, not a fix
+        # (spec 122-01), so it does not reopen the batch.
         _reopen_owner_flagged_batch(spec, args.slice, args.pass_name)
     if args.pass_name == "arch" and args.verdict != "pass":
         # Spec 122-01: an escalated arch verdict is a person's decision, not

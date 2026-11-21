@@ -138,7 +138,8 @@ class UiRuleTests(unittest.TestCase):
 
     def test_substrings_do_not_match(self):
         for text in ("build the guide", "a screenshot diff", "quiet mode",
-                     "clickhouse import", "tapestry"):
+                     "clickhouse import", "tapestry", "touchscreen",
+                     "scss", "Maui"):
             self.assertEqual(self.signals(f"**Goal:** {text}.\n"), [], text)
 
     def test_frontmatter_and_comments_are_not_scanned(self):
@@ -231,6 +232,10 @@ class SessionPlanTests(Base):
         self.assertIn("Recommended answer: yes", line)
         self.assertIn("Do not answer for them", line)
 
+    def test_done_slices_get_no_line(self):
+        self.write_slice(UI_BODY, status="DONE")
+        self.assertNotIn("NOT ASKED YET", self.plan())
+
     def test_answered_or_non_ui_slices_get_no_line(self):
         for body, extra in ((UI_BODY, "owner_review: false\n"),
                             (PLAIN_BODY, "")):
@@ -259,8 +264,11 @@ class AuthoringSurfaceTests(unittest.TestCase):
 
     def test_skill_prints_the_same_word_list(self):
         flat = re.sub(r"\s+", " ", SKILL_MD.read_text())
-        listed = ", ".join(f"`{t}`" for t in workflow.OWNER_REVIEW_UI_TERMS)
-        self.assertIn(listed, flat)
+        start = flat.index("contain one of these terms")
+        listed = flat[flat.index(":", start) + 1:flat.index(". A false", start)]
+        self.assertEqual(
+            re.findall(r"`([^`]+)`", listed),
+            list(workflow.OWNER_REVIEW_UI_TERMS))
 
     def test_template_carries_the_commented_flag(self):
         text = TEMPLATE.read_text()

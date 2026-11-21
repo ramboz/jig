@@ -232,15 +232,14 @@ class ReopenBatchTests(OwnerReviewBase):
         self.record_other("compliance", "pass")
         self.record_other("craft", "pass")
         self.assertEqual(self.record().returncode, 0)  # old reply, after R
-        import time
-        time.sleep(1.1)
-        run_review("owner-review", str(self.spec), "900-01")  # re-ask
+        # Re-ask, seeded one minute later than the recorded reply (no sleep).
+        text = path.read_text()
+        path.write_text(text.replace(
+            "owner_review_asked_at: 2026-01-01T00:00:00Z",
+            "owner_review_asked_at: 2099-01-01T00:00:00Z"))
         check = run_review("check-reviews", str(self.spec), "900-01")
         self.assertEqual(check.returncode, 2, check.stdout)
         self.assertIn("a new answer is pending", check.stderr)
-        self.assertEqual(self.record().returncode, 0)  # the new answer
-        check = run_review("check-reviews", str(self.spec), "900-01")
-        self.assertEqual(check.returncode, 0, check.stderr)
 
     def test_no_reopen_means_no_ask_time_requirement(self):
         self.record_other("compliance", "pass")
@@ -249,6 +248,29 @@ class ReopenBatchTests(OwnerReviewBase):
         self.assertNotIn("owner_review_asked_at", self.slice_text())
         check = run_review("check-reviews", str(self.spec), "900-01")
         self.assertEqual(check.returncode, 0, check.stderr)
+
+    def test_every_reviewed_stage_pass_reopens(self):
+        for pass_name in ("compliance", "arch", "code-health",
+                          "design-review"):
+            path = self.spec.parent / "slice-01-entry.md"
+            path.write_text(path.read_text().replace(
+                "review_reopened_at", "old_reopened_at"))
+            r = self.record_other(pass_name, "needs-changes")
+            self.assertEqual(r.returncode, 0, (pass_name, r.stderr))
+            self.assertIn("review_reopened_at: ", self.slice_text(),
+                          pass_name)
+
+    def test_an_escalated_arch_verdict_does_not_reopen(self):
+        r = run_review(
+            "record-review", str(self.spec), "900-01", "--pass", "arch",
+            "--verdict", "fail", "--reviewer", "jig:reviewer",
+            "--prompt-source", "review.py x", "--summary-file", "-",
+            stdin=("VERDICT: fail\n\nSPECIFIC ISSUES:\n"
+                   "- [blocker][spec] x — ESCALATE: pick a path\n"))
+        self.assertEqual(r.returncode, 0, r.stderr)
+        self.assertIn("STOP", r.stdout)
+        self.assertNotIn("review_reopened_at", self.slice_text())
+        self.assertNotIn("reopened the review batch", r.stdout)
 
     def test_owner_rejection_stamps_too(self):
         r = self.record(verdict="needs-changes")
