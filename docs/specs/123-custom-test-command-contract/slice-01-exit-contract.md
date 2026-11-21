@@ -101,8 +101,70 @@ from the count.
 
 The original spec is preserved above. Implementation notes:
 
-_TODO: numbered sections covering deviations from the planned shape,
-reviewer findings folded back in, doc updates, plan adherence._
+1. **Polarity changed after the frame critique.** The first draft kept every
+   non-zero status other than 2 as red ("backward compatibility"). The ADR's
+   round-1 frame critique showed that fails open on the conventional
+   could-not-run statuses (126/127, signals) every shell wrapper produces, so
+   the rule became "only 1 is red" (ADR-0068 §2, Option F rejected). AC1/AC2
+   test 2, 3, 101 and 127.
+2. **`slice-land` brought in scope (frame critique, round 1).** `land.py
+   check_tests` mapped every `tdd.py run` exit 2 to the non-blocking doc-only
+   `warn`; the new contract would have opened the land gate. Added the
+   `could_not_run` status (spec D4), `tests_block()`, a blocker line and a
+   loud readiness row. The row quotes `tdd.py`'s last stderr line. That
+   detail is carried in a module-level `_could_not_run_detail` set by
+   `check_tests`, so its `(status, exit_code)` return (unpacked by callers
+   and tests) is unchanged; the craft review called this hidden state and
+   suggested a wider return. Kept, with the trade-off in a code comment.
+3. **`tdd.py`'s own failure paths (frame critique, round 2).** AC6a added: an
+   unparsable `.jig/test-command`, undecodable command output
+   (`errors="replace"`) and an uncaught exception in the helper now exit 2;
+   the catch-all used to return 1, which `bug.py` would read as red.
+4. **A blank `.jig/test-command` counts as a declared runner in `land.py`**
+   (frame critique, round 3). `tdd.py detect` skips a blank or comment-only
+   file while `run` exits 2 on it, so it reached `land.py` as the doc-only
+   warning. `land.py` now treats the file's presence as runner intent, so it
+   and `detect` classify that file differently. The row says "detected or
+   declared".
+5. **Not changed, by decision:** the `REVIEWED` green check still routes any
+   non-zero exit, including an environment error, back to `DIAGNOSING`
+   (bug 043, ADR-0016 back-edge pinned by a bug 021 test); the built-in
+   runner paths still read a load failure as red (bug 042). Both were found
+   here and filed, per the owner's instruction not to fix them in this spec.
+6. **The "fix" advice in the message.** The draft ADR suggested
+   `sh -c "make test || exit 1"`. The frame critique showed that turns a build
+   failure back into red. The contract line now says exit 1 must mean a test
+   ran and failed, and a test asserts it carries no `||` advice.
+7. **Review findings folded in after the implementation reviews.** Compliance
+   round 1 (`needs-changes`): the servo-silence test could pass without the
+   feature (now uses the servo-marker fixture), no `prepare()`-level verdict
+   test (added `test_prepare_could_not_run_is_not_go`), a stale docstring
+   (fixed), the row wording (reworded), an unquoted interpreter path in a
+   fixture (quoted). Each new test was mutation-checked: removing
+   `could_not_run` from the servo silent tuple, or reverting `has_blocker` to
+   `test_status == "red"`, turns it red. Craft (`pass`) nits: the AC label in
+   a comment and the same docstring, both fixed; the redundant
+   `except (FileNotFoundError, OSError)` is pre-existing and left alone.
+8. **Compliance round 2 (`needs-changes`).** The pytest-module-missing edge
+   case had no test; added
+   `test_pytest_detected_but_module_missing_is_could_not_run` (a shadowing
+   `pytest.py` that raises `ImportError`, so it holds on machines with
+   pytest installed). Recorded per its notes: `_run_streaming`'s
+   `errors="replace"` also covers targeted runs of the built-in runners, not
+   only custom commands; the `OSError` catch on the custom launch paths is
+   pre-existing.
+9. **Behaviour change for existing projects (spec D4).** A detected runner
+   that exits 2 now blocks `slice-land` where it used to be the doc-only
+   warning. Built-in cases included: the pytest module missing (for example
+   a unittest-only repository with `test_*.py` files, which `tdd.py`
+   detects as pytest) and a runner binary missing. The row quotes the
+   reason; the ways out are installing the runner or a `.jig/test-command`.
+   Called out in the PR body.
+10. **Red before green.** The 123-01 tests in `test_tdd.py` and `test_bug.py`
+   were written first and failed (6 tdd failures/errors, 1 bug failure)
+   before `_custom_exit` existed; the land tests failed (2 failures, 2 errors)
+   before `could_not_run` existed. Mutation check: making `_custom_exit`
+   return 1 for any other status turns 19 Spec123 assertions red.
 
 ### Reconciliation sweep
 
@@ -112,13 +174,16 @@ whether coverage and rationales are honest.
 
 | Artifact | Disposition | Rationale |
 |----------|-------------|-----------|
-| `README.md` | `no-op` | _TODO: why this slice did not affect the project front door, or summarize the update._ |
-| `docs/specs/README.md` | `updated` | _TODO: regenerated by `workflow.py status-board`, or explain why deferred._ |
-| `docs/product-vision.md` | `no-op` | _TODO: checked for behavior / scope drift._ |
-| `docs/architecture.md` | `no-op` | _TODO: checked for module-boundary / public-contract drift._ |
-| Primer surfaces: `CLAUDE.md` / `AGENTS.md` / scaffold templates | `no-op` | _TODO: primer hygiene checked; note compression or template updates if any._ |
-| `docs/inbox.md` | `no-op` | _TODO: checked for items resolved by this slice._ |
-| `docs/refinement-todo.md` | `no-op` | _TODO: checked for resolved items or new deferred decisions._ |
-| `docs/memory/**` | `no-op` | _TODO: note memory-sync result or why nothing was worth capturing._ |
-| `docs/decisions/README.md` / ADR index | `no-op` | _TODO: use `updated` when the slice touched ADRs; otherwise mark checked._ |
-| Additional live prose / generated templates touched by this slice | `deferred` | _TODO: name owner or trigger when real cleanup remains; otherwise replace with `no-op`._ |
+| `README.md` | `no-op` | Checked: the front door names `tdd-loop` but states no runner list or exit contract. |
+| `docs/specs/README.md` | `updated` | Regenerated by `workflow.py status-board`. |
+| `docs/architecture.md` | `no-op` | Checked: lists `tdd.py` / `land.py` as helpers only; no exit contract or runner list to correct. Module boundaries unchanged. |
+| Primer surfaces: `CLAUDE.md` / `AGENTS.md` / scaffold templates | `no-op` | `CLAUDE.md` is left alone to keep the primer byte budget (spec 122-03 precedent); the per-slice invariants go to the status-board Notes column. The scaffold template change is in 123-02's row. |
+| `docs/inbox.md` | `no-op` | Checked: no parked item about runners or the test command. |
+| `docs/memory/**` | `no-op` | Checked: the glossary has no runner-list entry. The durable facts live in ADR-0068 and the tdd-loop SKILL.md. |
+| `docs/decisions/README.md` / ADR index | `updated` | ADR-0068 added and accepted; index regenerated by `adr.py index`, `check-index` clean. |
+| `docs/bugs/**` | `updated` | Bugs 042 (built-in runners read a load failure as red) and 043 (`REVIEWED` reopens on an environment error) filed; board regenerated, `check-board` clean. |
+| Generated host packages (`hosts/**`) | `updated` | Rebuilt by `scripts/build_host_packages.py`; `--check` clean. |
+| `docs/product-vision.md` | `no-op` | Changed by 123-02 (the out-of-scope line), not by this slice. |
+| `docs/refinement-todo.md` | `no-op` | No decision deferred by this slice; the JUnit-XML reader entry belongs to 123-02. |
+| `skills/slice-land/SKILL.md` / `land.py` module docstring | `updated` | Test-check warnings section and readiness-check list describe the `could_not_run` blocker. |
+| Additional live prose | `no-op` | `skills/bug-fix/SKILL.md` already said exit 2 fails closed at `FIXING`; its no-runner text belongs to 123-02. |

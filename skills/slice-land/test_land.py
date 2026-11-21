@@ -3026,6 +3026,21 @@ class Spec123CouldNotRunTests(unittest.TestCase):
         (self.proj / ".jig" / "test-command").write_text("# sh test.sh\n")
         self.assertEqual(_land.check_tests(self.proj), ("could_not_run", 2))
 
+    def test_pytest_detected_but_module_missing_is_could_not_run(self):
+        # Edge case (spec D4): a project detected as pytest whose pytest
+        # module cannot be imported was the doc-only warning; it now blocks,
+        # and the row carries tdd.py's reason. A shadowing `pytest.py` that
+        # raises ImportError stands in for "not installed" on any machine.
+        from unittest.mock import patch
+        (self.proj / "conftest.py").write_text("")
+        shadow = self.proj / "shadow"
+        shadow.mkdir()
+        (shadow / "pytest.py").write_text("raise ImportError('no pytest')\n")
+        with patch.dict(os.environ, {"PYTHONPATH": str(shadow)}):
+            self.assertEqual(_land.check_tests(self.proj),
+                             ("could_not_run", 2))
+        self.assertIn("not installed", _land._could_not_run_detail)
+
     def test_detail_is_cleared_by_a_later_check(self):
         self._custom_command(2)
         _land.check_tests(self.proj)
