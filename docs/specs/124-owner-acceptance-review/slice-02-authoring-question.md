@@ -113,11 +113,15 @@ The original spec is preserved above. Implementation notes:
    not match `checkbox`.
 7. **The transition note prints before later gates run**, so a transition
    that is then refused still shows it; result and exit code unchanged.
-8. **Dogfood.** This slice classifies `ask` itself (it mentions "UI"); the
+8. **No frontmatter means `not-applicable`** (beyond AC4, which only says
+   no note is written): such a slice has nowhere to carry an answer. A
+   hyphen counts as a word boundary (`UI-related` matches `ui`); SKILL.md
+   says so.
+9. **Dogfood.** This slice classifies `ask` itself (it mentions "UI"); the
    flag is left absent because only the owner may answer it.
-9. **Reviews.** Compliance round 1 `needs-changes` (wrapped terms, scope
-   deviation unrecorded, DONE slices); craft `pass` with nits. All folded
-   in above.
+10. **Reviews.** Compliance round 1 `needs-changes` (wrapped terms, scope
+   deviation unrecorded, DONE slices), round 2 `pass`; craft `pass` with
+   nits. All folded in above.
 
 ### Reconciliation sweep
 
