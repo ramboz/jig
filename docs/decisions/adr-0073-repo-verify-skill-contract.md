@@ -50,12 +50,12 @@ for *how to run the app*. It does not revisit enforcement.
 (`ramboz/servo` `skills/eval-authoring/score.py:415-429`) is "a documented,
 deliberately-unbuilt seam" that raises `EnvError` rather than score a
 placeholder; servo's refinement-todo entry "eval-authoring — candidate-gather
-(running the system under test) is unbuilt" (`docs/refinement-todo.md:862`)
-waits for a first real consumer. servo spec 049 plans to use a project's verify
-skill there. servo's nearest working shape is content-fidelity's command
-source: an argv list, run from the project root, exit 0 required, stdout as
-the output, anything else an `EnvError`
-(`skills/content-fidelity/score.py:125-161`).
+(running the system under test) is unbuilt" (servo
+`docs/refinement-todo.md:862`) waits for a first real consumer. servo spec 049
+plans to use a project's verify skill there. servo's nearest working shape is
+content-fidelity's command source: an argv list, run from the project root,
+exit 0 required, stdout as the output, anything else an `EnvError` (servo
+`skills/content-fidelity/score.py:125-161`).
 
 **Hosts do not share one project-skill folder.** Claude Code reads
 `.claude/skills/`, Codex reads `.agents/skills/`
@@ -128,7 +128,13 @@ jig renders and maintains a Claude skill, a Codex skill and a Copilot skill
 
 ## Recommended Decision
 
-**Option D.**
+**Option D.** It is the only option that gives the agent the know-how on
+demand and gives a machine a command, in one file the project owns. A pays the
+re-derivation cost on every slice. B pays context on every turn and has
+nothing to call. C has the command but not the know-how, and would still need
+a skill to get used. E makes jig maintain knowledge that belongs to the
+project. D's costs (two possible folders, one unprefixed skill in discovery,
+an unprobed frontmatter key) are each small and handled below.
 
 1. **The contract is a project skill named `verify`.** It lives in the project
    scope of the host the project uses: `.claude/skills/verify/SKILL.md` (read
@@ -248,9 +254,10 @@ it to `governance.PROTECTED_PATHS` (`skills/scaffold-init/governance.py:60-67`).
   file in the scaffolding host's folder plus a documented link for a second
   host. Should scaffold-init write both folders when a project declares two
   hosts?
-- **Top-level `verify-command:` or `metadata.verify-command`?** The Agent
-  Skills format has a free-form `metadata` map; jig's own frontmatter reader
-  handles flat keys. Decided by the 128-01 host probe.
+- **Top-level `verify-command:` or `metadata.verify-command`?** The open
+  Agent Skills format is understood to allow a free-form `metadata` map (not
+  verified here); every jig SKILL.md uses flat keys. Decided by the 128-01
+  host probe.
 - **Per-case input for servo.** If servo 049 needs it, an opt-in `{input}`
   placeholder mirroring `.jig/test-command`'s `{test}` (`tdd.py:46-47`, bug
   021) would keep it optional. Not built until servo 049 asks.

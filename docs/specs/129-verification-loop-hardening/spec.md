@@ -72,7 +72,7 @@ for review, each taken from the Claude Code team's verification post:
   not resolve 006-03; its trigger is unchanged. 129-01's observe log is a
   cheap way to see whether that trigger is close.
 - **refinement-todo "Warn when an escalated arch record is overwritten (spec
-  122-01)".** "Nothing prevents an orchestrator from re-running the arch pass
+  122-01)"** (`docs/refinement-todo.md:52-54`). "Nothing prevents an orchestrator from re-running the arch pass
   before a person decides and overwriting the escalated record with a `pass`."
   Trigger: "First observed run where an escalated arch record was overwritten
   before a person decided, OR the arch-review redesign's round-two evals show
