@@ -356,6 +356,8 @@
 | [122-arch-pass-escalation-and-rounds](122-arch-pass-escalation-and-rounds/spec.md) | 122-01 — escalate-stops-the-slice | **DONE** | Arch `[blocker] ESCALATE:` on a non-`pass` record → `record-review` STOP notice + gate says "a person must decide"; clearing stays `verdict: pass` (body read for the message only); orchestrator parks it via `memory.py add-inbox` + `blocked_by:`. |
 | [122-arch-pass-escalation-and-rounds](122-arch-pass-escalation-and-rounds/spec.md) | 122-02 — arch-round-carry-over | **DONE** | A re-run arch prompt names `reviews/slice-NN-arch.md` (read after the reviewer's own review); every arch round ends REASONING with `round: N · open · searched`; jig never parses that line; other passes byte-identical. Owner-approved exception in `conventions.md`. |
 | [122-arch-pass-escalation-and-rounds](122-arch-pass-escalation-and-rounds/spec.md) | 122-03 — one-blocking-rule | **DONE** | Only `pass` clears (ADR-0014 §3); craft/arch/code-health return `pass` when no `[blocker]` remains; the orchestrator records the verdict as returned. Pinned by `OneBlockingRuleTests`. |
+| [124-owner-acceptance-review](124-owner-acceptance-review/spec.md) | 124-01 — owner-review pass | RECONCILED (claude/elegant-chaplygin-fa…) |  |
+| [124-owner-acceptance-review](124-owner-acceptance-review/spec.md) | 124-02 — authoring question | RECONCILED (claude/elegant-chaplygin-fa…) |  |
 
 ## Deferred slices
 
@@ -399,7 +401,7 @@ Advisory (ADR-0040 auditability — never blocks). Regenerated from `reviews/sli
 
 - **0** pass(es) recorded `not-shown` (selection step did not run — the kill-criterion-1 defect signal).
 - **25** pass(es) recorded `non-interactive` (declared no-orchestrator / CI).
-- **20** shown-and-declined anomaly(ies) (a high-confidence richer skill was shown and not applied):
+- **22** shown-and-declined anomaly(ies) (a high-confidence richer skill was shown and not applied):
   - `088-project-orientation/slice-02-arch.md` — applied `none`; declined: arch-review
   - `088-project-orientation/slice-02-craft.md` — applied `none`; declined: arch-review, independent-review, pr-review, scout-pr-review
   - `113-copilot-third-host/slice-02-arch.md` — applied `none`; declined: arch-review
@@ -420,3 +422,5 @@ Advisory (ADR-0040 auditability — never blocks). Regenerated from `reviews/sli
   - `122-arch-pass-escalation-and-rounds/slice-01-craft.md` — applied `pr-review`; declined: arch-review, independent-review, scout-pr-review
   - `122-arch-pass-escalation-and-rounds/slice-02-craft.md` — applied `unknown`; declined: arch-review, independent-review, pr-review, scout-pr-review
   - `122-arch-pass-escalation-and-rounds/slice-03-craft.md` — applied `pr-review`; declined: arch-review, independent-review, scout-pr-review
+  - `124-owner-acceptance-review/slice-01-craft.md` — applied `pr-review`; declined: arch-review, independent-review, scout-pr-review
+  - `124-owner-acceptance-review/slice-02-craft.md` — applied `pr-review`; declined: arch-review, independent-review, scout-pr-review
