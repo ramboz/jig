@@ -174,7 +174,7 @@ The original spec is preserved above. Implementation notes:
 | `docs/inbox.md` | `no-op` | No item resolved by this slice. |
 | `docs/refinement-todo.md` | `updated` | Build-binding and bug-lifecycle entries added. |
 | `docs/memory/**` | `updated` | Glossary review-evidence entry names owner-review. |
-| `docs/decisions/README.md` / ADR index | `deferred` | ADR-0069 is Proposed and awaits the owner; `adr.py index` + `accept` run when the owner accepts it, before DONE. |
+| `docs/decisions/README.md` / ADR index | `updated` | ADR-0069 indexed as Proposed (`adr.py index`); `adr.py accept` + re-index run when the owner accepts it, before DONE. |
 | `docs/decisions/adr-0069-…md` + `docs/decisions/reviews/adr-0069-frame-critique.md` | `updated` | Drafted, Proposed; four frame-critique rounds, the last `pass`. |
 | `hosts/` | `updated` | Regenerated; `build_host_packages.py --check` clean. |
 

@@ -151,8 +151,8 @@ class GateTests(unittest.TestCase):
         self.assertIn("TRIED:", diags[0])
 
     def test_rejection_keeps_the_slice_in_progress(self):
+        spec = self._spec()
         for verdict in ("needs-changes", "fail"):
-            spec = self._spec() if verdict == "needs-changes" else spec
             write_verdict(spec, "owner-review", verdict=verdict,
                           body=GOOD_BODY)
             diags = ev.validate_evidence(spec, "900-01", "REVIEWED")
