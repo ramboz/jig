@@ -178,6 +178,9 @@ records it and settles the details.
    keys on a recorded non-`pass` verdict, so on a flagged slice the agent
    must record every rejection before fixing, not just fix and re-run; the
    ask and the skill say so, and an agent that skips it leaves no stamp.
+   An escalated arch verdict (spec 122) does not reopen the batch, since it
+   waits on a person's decision rather than a fix; a change that follows
+   that decision is one more case of a change with no recorded rejection.
    It does not catch a change made with no rejection at all (general
    code-staleness stays deferred, ADR-0014 Scope); for that case the ask
    and the docs state the rule: if the build changes after the owner was
