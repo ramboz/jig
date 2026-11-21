@@ -129,7 +129,7 @@ Probed 2026-11-21 against `main` at jig `87610a9` and servo `17b9ae9`.
 | Run the change (4) | Spec 118 adds optional "Verification scenario" sections with pass / fail / not-run / environment-error outcomes; no repo-owned "how to run the app" artifact; nothing gates on it. | design-eval captures the running app for visual fidelity; `_gather_candidate` (running the system under test) is a deliberately unbuilt seam (`refinement-todo.md`). |
 | Cheap first (10) | CI runs lint and tests for jig itself; for specs, the green-tests check sits at slice-land, *after* review. | `oracle.sh.template` runs every component and averages, so judged components run even when tests score 0. |
 | Can't modify own checks (9) | Governance plane (ADR-0051) scaffolds CODEOWNERS + a protected-path workflow, but the workflow runs `on: pull_request` (the PR's own copy). `review.py` config is read from the working tree. jig does not run its own governance plane. | Freeze hashes are "tripwires for honest drift … not a sandbox" (`docs/architecture.md`); approval records live in the same worktree as the runner. |
-| Bound to a commit (9, 11) | Review records carry `reviewed_at`, not a commit. `land.py` writes hard-coded `[x] All ACs pass` lines into PR bodies. Code-staleness gating for review evidence is deferred. | Run state and ledgers carry no evaluated commit; `gate.py` writes no ledger. |
+| Bound to a commit (9, 11) | Review records carry `reviewed_at`, not a commit. `land.py` writes hard-coded `[x] All ACs pass` lines into PR bodies. Code-staleness gating for review evidence is deferred. | Since spec 042-04, run `state.json` records the starting commit and a content fingerprint at halt; individual evaluations (ledger records, spec-oracle evidence) are not bound to a tree, and `gate.py` writes no ledger. |
 | Off / observe / enforce (11) | Gates are on/off with `JIG_*_GATE=0` bypasses; spec 078 logs bypass events. | `oracle-hook` blocks a stop once, then lets the next through (aligned with the anti-stuck valve). |
 | Diff-triggered checklist (7, 13) | `learnings.md` (~1,500 lines of prose) never reaches the reviewer; review passes are switched on by author-set flags. | Nothing equivalent. |
 | Three rounds then a human (5) | Spec 122: an arch `ESCALATE:` stops the slice and rounds are carried; no numeric round cap for any pass. | Loop caps (5 iterations, plateau window 3) and quarantine; escalation is recorded, not raised. |
@@ -171,6 +171,10 @@ promotion (items 11, 13), and fix-evidence separation (item 9).
   change affordable? (ADR-0071)
 - Should the verify-skill contract be one file across Claude Code, Codex, and
   Copilot, or one per host? (ADR-0073)
+- **Unowned: the post's commit gate itself** (block a commit when the session
+  ran neither review nor verify). ADR-0069 records how a commit was verified
+  and ADR-0070 supplies the observe/enforce mechanism, but no promoted artifact
+  proposes the gate. Decide whether jig wants one before drafting it.
 
 ## Conclusion
 
