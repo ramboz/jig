@@ -1,5 +1,5 @@
 ---
-status: IN_PROGRESS
+status: DONE
 skill: tdd-loop
 use_cases: [UC-5, UC-8]
 ---
