@@ -152,8 +152,12 @@ The original spec is preserved above. Implementation notes:
    verdict to a build"): changes with no recorded rejection, an ask run
    before the fix exists, and a parallel automated `pass` returning after
    another pass's rejection. ADR-0069 decision 6 names these limits.
-9. **Reviews.** Compliance round 1 `needs-changes` (the re-ask hole, fixed
-   above); craft `pass` and arch `pass` with nits, folded in as items 2–6.
+9. **Same-second strictness.** The ask must be strictly later than the
+   reopen stamp (one-second resolution), so an ask run in the same second
+   as the reopen is refused; this fails closed and the remedy is to ask
+   again.
+10. **Reviews.** Compliance round 1 `needs-changes` (the re-ask hole, fixed
+   above), round 2 `pass`; craft `pass` and arch `pass` with nits, folded in as items 2–6.
    ADR frame-critique ran four rounds; rounds 1–3 drove decision 6.
 
 ### Reconciliation sweep

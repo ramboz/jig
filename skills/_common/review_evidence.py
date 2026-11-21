@@ -72,8 +72,6 @@ PASSES = ("compliance", "craft", "arch", "code-health", "reconciliation",
           "frame-critique", "design-review", "bug-review", "security",
           "owner-review")
 
-
-
 # ADR-0014 §3: allowed verdict values.
 VERDICTS = ("pass", "fail", "needs-changes")
 
