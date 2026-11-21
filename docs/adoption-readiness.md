@@ -48,7 +48,7 @@ next action and links out, rather than recreating a leadership curriculum.
 - **Python 3** on `PATH` — every jig helper and hook is Python 3 (no `jq`,
   no Node required for the machinery itself).
 - **A test command** for your stack (pytest / vitest / jest / `node --test`
-  are auto-detected; any other stack supplies its command in a
+  are auto-detected, and that list is closed; any other stack supplies its command in a
   `.jig/test-command` file, which must exit 0 when tests pass, 1 when a test
   failed and anything else when it could not run them) — or an explicit
   acknowledgement that the project has none yet.

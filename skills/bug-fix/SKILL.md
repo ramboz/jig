@@ -167,7 +167,8 @@ else when it could not run them. jig adds no per-framework runners
 the contract and a worked Gradle wrapper are in
 [test-command-recipes.md](../tdd-loop/test-command-recipes.md). A bare build
 command that exits 1 on a compile failure would be recorded as a witnessed
-failing test, so do not use one. The repository-closure gates make reuse/history discovery and call-site
+failing test, so do not use one.
+The repository-closure gates make reuse/history discovery and call-site
 closure durable evidence (see the **Repository-closure inventory** subsection
 under step 2 below).
 

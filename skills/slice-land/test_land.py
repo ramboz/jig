@@ -9,6 +9,7 @@ Or from the skill dir:
 
 import os
 import re
+import shlex
 import subprocess
 import sys
 import tempfile
@@ -2796,6 +2797,30 @@ class ServoSuggestionTests(unittest.TestCase):
                           return_value=interactive):
             return _land.prepare(self.spec, "072-02", target=self.target)
 
+    def test_could_not_run_keeps_the_suggestion_silent_with_servo_present(self):
+        # Spec 123-01: with servo's marker present, only the status guard
+        # keeps the suggestion out of a could-not-run report.
+        self._write_marker()
+        self.assertIn("/servo:scaffold-init",
+                      _land.render_servo_suggestion(self.target, "green"))
+        self.assertEqual(
+            _land.render_servo_suggestion(self.target, "could_not_run"), "")
+
+    def test_prepare_could_not_run_is_not_go(self):
+        # Spec 123-01 AC7: the verdict wiring, not just tests_block().
+        from unittest.mock import patch
+        with patch.object(_land, "_output_is_interactive", return_value=False):
+            with patch.object(_land, "check_tests", return_value=("green", 0)):
+                _r, green_code = _land.prepare(self.spec, "072-02",
+                                               target=self.target)
+            with patch.object(_land, "check_tests",
+                              return_value=("could_not_run", 2)):
+                report, code = _land.prepare(self.spec, "072-02",
+                                             target=self.target)
+        self.assertEqual(green_code, 0)
+        self.assertEqual(code, 1)
+        self.assertIn("Tests could not be run", report)
+
     def test_prepare_interactive_shows_and_writes_marker(self):
         self._write_marker()
         report, _code = self._run_prepare(interactive=True)
@@ -2970,7 +2995,7 @@ class Spec123CouldNotRunTests(unittest.TestCase):
         jig = self.proj / ".jig"
         jig.mkdir()
         (jig / "test-command").write_text(
-            f"{sys.executable} exiter.py {{test}}\n")
+            f"{shlex.quote(sys.executable)} exiter.py {{test}}\n")
 
     def _checks(self, test_status: str, test_exit: int) -> dict:
         return {
@@ -3007,10 +3032,6 @@ class Spec123CouldNotRunTests(unittest.TestCase):
         (self.proj / "exiter.py").write_text("raise SystemExit(0)\n")
         _land.check_tests(self.proj)
         self.assertEqual(_land._could_not_run_detail, "")
-
-    def test_could_not_run_keeps_the_servo_suggestion_silent(self):
-        self.assertEqual(
-            _land.render_servo_suggestion(self.proj, "could_not_run"), "")
 
     def test_custom_command_exit_1_is_red_and_exit_0_green(self):
         self._custom_command(1)

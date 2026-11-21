@@ -119,8 +119,10 @@ fi
 # Read the counts from each report's <testsuite ...> header, not from the
 # body: the body also holds the tests' captured output, which can contain
 # anything.
-headers=$(find "$RESULTS" -type f -name 'TEST-*.xml' \
-          -exec grep -h -o -E '<testsuite [^>]*>' {} +)
+# Only the first <testsuite ...> tag of each file is its header; a later
+# match could come from a test's captured output.
+headers=$(find "$RESULTS" -type f -name 'TEST-*.xml' -exec sh -c '
+  for f; do grep -o -E "<testsuite [^>]*>" "$f" | head -n 1; done' sh {} +)
 ran=$(printf '%s\n' "$headers" | sed -n 's/.* tests="\([0-9][0-9]*\)".*/\1/p' |
       awk '{ n += $1 } END { print n + 0 }')
 if [ "$ran" -eq 0 ]; then

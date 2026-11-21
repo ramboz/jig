@@ -560,8 +560,9 @@ def render_readiness_section(checks: dict) -> str:
                      "(slice may be doc-only)")
     elif test_status == "could_not_run":
         # Spec 123-01 — a runner exists but `tdd.py run` exited 2.
-        lines.append("- [ ] Tests: COULD NOT RUN — a test runner was "
-                     "detected but `tdd.py run` exited 2 (environment error: "
+        lines.append("- [ ] Tests: COULD NOT RUN — a test runner is "
+                     "detected or declared (`.jig/test-command`) but "
+                     "`tdd.py run` exited 2 (environment error: "
                      "build failure, missing tool, or a `.jig/test-command` "
                      "that reported it could not run the tests). This is "
                      "NOT a pass."

@@ -57,8 +57,8 @@ RECIPES_DOC = "test-command-recipes.md"
 # One line, at most 300 characters: bug.py quotes the last stderr line of a
 # failed run up to that length, so this reaches the bug-fix gate error whole.
 NO_RUNNER_HINT = (
-    "no built-in runner matched: put the test command on line 1 of "
-    ".jig/test-command ({test} = selector slot); exit "
+    "way out: put the test command as the first "
+    "non-comment line of .jig/test-command ({test} = selector); exit "
     f"{CUSTOM_EXIT_CONTRACT} (a build failure is not 1: a build tool needs "
     f"a wrapper) - see {RECIPES_DOC} in the tdd-loop skill"
 )

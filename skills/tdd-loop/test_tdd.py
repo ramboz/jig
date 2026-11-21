@@ -10,6 +10,7 @@ import json
 import os
 import re
 import shlex
+import shutil
 import subprocess
 import sys
 import tempfile
@@ -857,8 +858,9 @@ class Bug021CustomCommandSelectorContractTests(unittest.TestCase):
 
 class Spec123CustomCommandExitContractTests(unittest.TestCase):
     """ADR-0068 §2: a custom .jig/test-command follows tdd.py's own contract —
-    0 green, 1 red, 2 "could not run" (environment error, never red); any
-    other non-zero status stays red."""
+    0 green, 1 red (a test ran and failed), and every other status (2, a
+    shell's 126/127, a runner code, a signal) "could not run": exit 2,
+    never red."""
 
     def setUp(self):
         self.tmp = tempfile.TemporaryDirectory()
@@ -969,7 +971,7 @@ class Spec123CustomCommandExitContractTests(unittest.TestCase):
             self.assertEqual(tdd.main(["tdd.py", "run", str(self.target)]), 2)
 
     def test_skill_md_documents_the_contract(self):
-        # AC7.
+        # AC9.
         text = SKILL_MD.read_text()
         self.assertIn("ADR-0068", text)
         self.assertIn("a test ran and failed", text)
@@ -1033,7 +1035,7 @@ counts='tests="1" skipped="0" failures="0" errors="0"'
 body='<testcase name="a" classname="p.C"/>'
 case "${STUB_REPORT:-none}" in
   pass)  ;;
-  noisy) out='<failure message="x"> <error> failures="3"'
+  noisy) out='<failure message="x"> <testsuite tests="9" failures="3">'
          body="$body<system-out><![CDATA[$out]]></system-out>" ;;
   fail)  counts='tests="1" skipped="0" failures="1" errors="0"'
          body='<testcase name="a" classname="p.C"><failure message="x">boom</failure></testcase>' ;;
@@ -1057,7 +1059,7 @@ def _recipe_script() -> str:
     return m.group(1) + "\n"
 
 
-@unittest.skipUnless(os.path.exists("/bin/sh"), "needs sh")
+@unittest.skipUnless(shutil.which("sh"), "needs sh")
 class Spec123GradleRecipeTests(unittest.TestCase):
     """Slice 123-02 AC6: the wrapper printed in test-command-recipes.md is
     extracted and run against a stub `gradlew`. This checks the script's own
@@ -1151,7 +1153,8 @@ class Spec123GradleRecipeTests(unittest.TestCase):
         for report, stub_exit, want in (("pass", 0, 0), ("fail", 1, 1),
                                         ("none", 1, 2)):
             with self.subTest(report=report):
-                env = os.environ.copy()
+                env = {k: v for k, v in os.environ.items()
+                       if not k.startswith(("JIG_GRADLE", "STUB_"))}
                 env.update(STUB_REPORT=report, STUB_EXIT=str(stub_exit))
                 r = subprocess.run(
                     [sys.executable, str(TDD_PY), "run", str(self.proj),
@@ -1165,9 +1168,9 @@ class Spec123GradleRecipeTests(unittest.TestCase):
         self.assertIn("The built-in list is closed", text)
         self.assertIn("does not add an adapter per test framework", text)
         self.assertIn("(test-command-recipes.md)", text)
-        self.assertNotIn("rspec / `go test` / `cargo test`\n  detection, AC",
-                         text)
-        self.assertNotRegex(text, r"Out of scope for slice 006-01:\*\* rspec")
+        # The old wording listed these runners as deferred detection work.
+        self.assertNotRegex(text, r"(?s)Out of scope[^\n]*\n?[^\n]*rspec")
+        self.assertIn("is not deferred work", text)
 
     def test_document_states_the_limits(self):
         text = RECIPES_MD.read_text()
