@@ -5,6 +5,7 @@ Run from the repo root:
     python3 skills/spec-workflow/test_workflow.py
 """
 
+import json
 import os
 import re
 import subprocess
@@ -7503,6 +7504,247 @@ class TransitionReadyForReviewFrameGateTests(_GateFixture):
                          f"DONE must not require frame-critique; stderr={r.stderr}")
 
 
+class Bug042FrameGateSkipTests(_GateFixture):
+    """Bug 042 (GitHub issue 251): the frame-critique gate was keyed on the
+    TARGET `READY_FOR_REVIEW` alone, and `transition` enforces no state
+    ordering — so a `frame_review: true` slice refused at READY_FOR_REVIEW
+    could walk DRAFT → READY_FOR_IMPLEMENTATION → IN_PROGRESS untouched.
+    The gate is a property of the EDGE: a flagged slice leaving the
+    pre-implementation zone (no status / DRAFT / READY_FOR_REVIEW /
+    READY_FOR_IMPLEMENTATION) for anything past READY_FOR_REVIEW needs the
+    frame-critique `pass`. Back-edges and releases out of a
+    post-implementation state stay ungated; unflagged slices stay free.
+
+    Red without the fix: the refusal tests, the claim-ref test and the
+    bypass-audit test. The rest are guards on the behaviour the fix must
+    not disturb (back-edges, releases, unflagged slices)."""
+
+    def _transition(self, target, *, gate=True):
+        return run_workflow("transition", str(self.spec_md), "045-01",
+                            target, gate=gate)
+
+    def _bypass_events(self):
+        log = self.tmpdir / ".claude" / "skill-usage.jsonl"
+        if not log.is_file():
+            return []
+        return [e for e in map(json.loads, log.read_text().splitlines())
+                if e.get("event") == "gate_bypassed"]
+
+    def _assert_blocked(self, r, stayed_at):
+        self.assertNotEqual(r.returncode, 0,
+                            f"must be refused; stdout={r.stdout}")
+        self.assertIn("frame-critique", r.stderr)
+        self.assertEqual(self._status_in_slice(), stayed_at)
+
+    # --- the reported walk (issue 251) ---
+    def test_issue_251_walk_needs_changes_verdict_is_refused(self):
+        self.write_slice("DRAFT", frame_review=True)
+        self.write_evidence("frame-critique", verdict="needs-changes")
+        self._assert_blocked(self._transition("READY_FOR_REVIEW"), "DRAFT")
+        self._assert_blocked(
+            self._transition("READY_FOR_IMPLEMENTATION"), "DRAFT")
+        self._assert_blocked(self._transition("IN_PROGRESS"), "DRAFT")
+
+    def test_flagged_draft_to_ready_for_implementation_blocked_no_verdict(self):
+        self.write_slice("DRAFT", frame_review=True)
+        r = self._transition("READY_FOR_IMPLEMENTATION")
+        self._assert_blocked(r, "DRAFT")
+        self.assertIn("record-review", r.stderr)
+
+    def test_flagged_draft_to_in_progress_blocked_no_verdict(self):
+        self.write_slice("DRAFT", frame_review=True)
+        self._assert_blocked(self._transition("IN_PROGRESS"), "DRAFT")
+
+    def test_flagged_ready_for_implementation_to_in_progress_blocked(self):
+        # A slice already parked at READY_FOR_IMPLEMENTATION without the
+        # pass (it skipped the gate before this fix, or was flagged later)
+        # is caught at pickup, before code is written.
+        self.write_slice("READY_FOR_IMPLEMENTATION", frame_review=True)
+        self._assert_blocked(self._transition("IN_PROGRESS"),
+                             "READY_FOR_IMPLEMENTATION")
+
+    def test_flagged_draft_cannot_jump_to_reviewed_without_frame_pass(self):
+        # Same edge, different target: leaving the pre-implementation zone
+        # for REVIEWED with passing compliance+craft still skips the
+        # pre-implementation pass.
+        self.write_slice("DRAFT", frame_review=True)
+        self.write_evidence("compliance")
+        self.write_evidence("craft")
+        self._assert_blocked(self._transition("REVIEWED"), "DRAFT")
+
+    # --- the legitimate forward walk ---
+    def test_flagged_slice_with_pass_walks_forward(self):
+        self.write_slice("DRAFT", frame_review=True)
+        self.write_evidence("frame-critique")
+        for target in ("READY_FOR_REVIEW", "READY_FOR_IMPLEMENTATION",
+                       "IN_PROGRESS"):
+            r = self._transition(target)
+            self.assertEqual(r.returncode, 0,
+                             f"→ {target} must clear; stderr={r.stderr}")
+            self.assertEqual(self._status_in_slice(), target)
+
+    def test_flagged_slice_with_pass_may_skip_ready_for_review(self):
+        # The fix validates evidence, it does not impose state ordering.
+        self.write_slice("DRAFT", frame_review=True)
+        self.write_evidence("frame-critique")
+        r = self._transition("IN_PROGRESS")
+        self.assertEqual(r.returncode, 0, r.stderr)
+        self.assertEqual(self._status_in_slice(), "IN_PROGRESS")
+
+    # --- unflagged slices stay free to skip states ---
+    def test_unflagged_slice_skips_states_freely(self):
+        for target in ("READY_FOR_IMPLEMENTATION", "IN_PROGRESS"):
+            with self.subTest(target=target):
+                self.write_slice("DRAFT")
+                r = self._transition(target)
+                self.assertEqual(r.returncode, 0, r.stderr)
+                self.assertEqual(self._status_in_slice(), target)
+
+    # --- back-edges / releases are not forward entries ---
+    def test_review_back_edges_stay_ungated_for_flagged_slice(self):
+        # Decided behaviour: a back-edge relaxes status on a slice whose
+        # code already exists — a PRE-implementation gate has nothing left
+        # to protect, and refusing would strand the slice in review. Holds
+        # with a passing verdict AND with none (a slice flagged late or
+        # walked under the bypass must still be able to take review fixes).
+        import shutil
+        for origin in ("REVIEWED", "RECONCILED"):
+            for with_pass in (True, False):
+                with self.subTest(origin=origin, with_pass=with_pass):
+                    shutil.rmtree(self.spec_dir / "reviews",
+                                  ignore_errors=True)
+                    self.write_slice(origin, frame_review=True)
+                    if with_pass:
+                        self.write_evidence("frame-critique")
+                    r = self._transition("IN_PROGRESS")
+                    self.assertEqual(r.returncode, 0, r.stderr)
+                    self.assertEqual(self._status_in_slice(), "IN_PROGRESS")
+
+    def test_frame_pass_survives_a_review_back_edge(self):
+        # Bug 039 invariant: `review_reopened_at` must not invalidate the
+        # one-time frame-critique verdict when the slice is later released
+        # to the queue and picked up again.
+        self.write_slice("REVIEWED", frame_review=True)
+        self.write_evidence("frame-critique",
+                            reviewed_at="2026-06-02T14:30:00Z")
+        for target in ("IN_PROGRESS", "READY_FOR_IMPLEMENTATION",
+                       "IN_PROGRESS"):
+            r = self._transition(target)
+            self.assertEqual(r.returncode, 0,
+                             f"→ {target}; stderr={r.stderr}")
+        self.assertIn("review_reopened_at",
+                      (self.spec_dir / "slice-01-thing.md").read_text())
+
+    def test_in_progress_release_to_queue_ungated_for_flagged_slice(self):
+        self.write_slice("IN_PROGRESS", frame_review=True)
+        r = self._transition("READY_FOR_IMPLEMENTATION")
+        self.assertEqual(r.returncode, 0, r.stderr)
+        self.assertEqual(self._status_in_slice(), "READY_FOR_IMPLEMENTATION")
+
+    def test_late_flagged_slice_released_to_queue_is_refused_at_repickup(self):
+        # The direct back-edge above is the route for review fixes. A
+        # flagged slice with NO pass that is instead released to the queue
+        # is back in the pre-implementation zone: the next pickup is gated.
+        self.write_slice("REVIEWED", frame_review=True)
+        r = self._transition("READY_FOR_IMPLEMENTATION")
+        self.assertEqual(r.returncode, 0, r.stderr)
+        self._assert_blocked(self._transition("IN_PROGRESS"),
+                             "READY_FOR_IMPLEMENTATION")
+
+    def test_unrecognised_or_missing_origin_status_fails_closed(self):
+        path = self.spec_dir / "slice-01-thing.md"
+        for origin_line in ("status: WIP\n", ""):
+            with self.subTest(origin_line=origin_line):
+                self.write_slice("DRAFT", frame_review=True)
+                path.write_text(
+                    path.read_text().replace("status: DRAFT\n", origin_line))
+                r = self._transition("IN_PROGRESS")
+                self.assertNotEqual(r.returncode, 0, r.stdout)
+                self.assertIn("frame-critique", r.stderr)
+                self.assertNotIn("IN_PROGRESS", path.read_text())
+
+    def test_ready_for_implementation_restamp_gated_for_flagged_slice(self):
+        # Fail-closed corollary: still pre-implementation, target past the
+        # gate. (The IN_PROGRESS re-stamp below is exempt — code exists.)
+        self.write_slice("READY_FOR_IMPLEMENTATION", frame_review=True)
+        self._assert_blocked(self._transition("READY_FOR_IMPLEMENTATION"),
+                             "READY_FOR_IMPLEMENTATION")
+
+    def test_refused_pickup_leaves_no_claim_reservation_ref(self):
+        # `→ IN_PROGRESS` reserves refs/claims/<N>. The frame gate must
+        # refuse BEFORE that, or the author's retry (after recording the
+        # pass) trips over a phantom reservation from their own attempt.
+        def git(*args):
+            return subprocess.run(
+                ["git", "-C", str(self.tmpdir), *args],
+                capture_output=True, text=True)
+        git("init", "-q")
+        init = git("-c", "user.name=t", "-c", "user.email=t@example.com",
+                   "-c", "commit.gpgsign=false",
+                   "commit", "-q", "--allow-empty", "-m", "init")
+        self.assertEqual(init.returncode, 0, init.stderr)
+        self.write_slice("DRAFT", frame_review=True)
+        self._assert_blocked(self._transition("IN_PROGRESS"), "DRAFT")
+        self.assertEqual(git("for-each-ref", "refs/claims").stdout, "")
+        # Sanity: with the pass, the same pickup DOES reserve the ref — so
+        # the empty result above is the gate's ordering, not a dead fixture.
+        self.write_evidence("frame-critique")
+        r = self._transition("IN_PROGRESS")
+        self.assertEqual(r.returncode, 0, r.stderr)
+        self.assertIn("refs/claims/045-01",
+                      git("for-each-ref", "refs/claims").stdout)
+
+    def test_in_progress_idempotent_restamp_ungated_for_flagged_slice(self):
+        self.write_slice("IN_PROGRESS", frame_review=True)
+        r = self._transition("IN_PROGRESS")
+        self.assertEqual(r.returncode, 0, r.stderr)
+
+    def test_relaxing_to_draft_or_deferred_ungated_for_flagged_slice(self):
+        for target in ("DRAFT", "DEFERRED"):
+            with self.subTest(target=target):
+                self.write_slice("READY_FOR_REVIEW", frame_review=True)
+                r = self._transition(target)
+                self.assertEqual(r.returncode, 0, r.stderr)
+
+    # --- the deliberate bypass stays, and stays logged ---
+    def test_bypass_lets_flagged_slice_through_and_logs_it(self):
+        self.write_slice("DRAFT", frame_review=True)
+        r = self._transition("READY_FOR_IMPLEMENTATION", gate=False)
+        self.assertEqual(r.returncode, 0, r.stderr)
+        self.assertEqual(self._status_in_slice(), "READY_FOR_IMPLEMENTATION")
+        events = self._bypass_events()
+        self.assertEqual(len(events), 1, events)
+        self.assertEqual(events[0]["gate"], "review-evidence")
+
+    def test_bypassed_jump_to_reviewed_logs_exactly_one_event(self):
+        # Both gate functions apply to this move; the audit trail must not
+        # double-count it.
+        self.write_slice("DRAFT", frame_review=True)
+        r = self._transition("REVIEWED", gate=False)
+        self.assertEqual(r.returncode, 0, r.stderr)
+        self.assertEqual(len(self._bypass_events()), 1)
+
+    def test_release_flag_does_not_skip_the_gate(self):
+        self.write_slice("READY_FOR_REVIEW", frame_review=True)
+        r = run_workflow("transition", str(self.spec_md), "045-01",
+                         "READY_FOR_IMPLEMENTATION", "--release",
+                         "--reason", "stale claim", gate=True)
+        self._assert_blocked(r, "READY_FOR_REVIEW")
+        r = run_workflow("transition", str(self.spec_md), "045-01",
+                         "DRAFT", "--release", "--reason", "stale claim",
+                         gate=True)
+        self.assertEqual(r.returncode, 0, r.stderr)
+        self.assertEqual(self._status_in_slice(), "DRAFT")
+
+    def test_unflagged_ungated_move_does_not_log_a_bypass(self):
+        # Widening the gated edges must not make every unflagged pickup
+        # under an inherited bypass env look like a gate bypass.
+        self.write_slice("DRAFT")
+        r = self._transition("READY_FOR_IMPLEMENTATION", gate=False)
+        self.assertEqual(r.returncode, 0, r.stderr)
+        self.assertEqual(self._bypass_events(), [])
+
+
 class TransitionReviewedGateTests(_GateFixture):
     """AC1: REVIEWED is gated on compliance + craft (+ arch when flagged)."""
 
@@ -8091,8 +8333,9 @@ class TransitionGateBypassTelemetryTests(_GateFixture):
         self.assertEqual(self._read_events(), [])
 
     def test_ungated_transition_emits_nothing(self):
-        # DRAFT -> READY_FOR_IMPLEMENTATION is not an evidence-gated state
-        # at all — the gate function no-ops before ever checking bypass.
+        # DRAFT -> READY_FOR_IMPLEMENTATION is ungated for an UNFLAGGED
+        # slice — the gate function no-ops before ever checking bypass.
+        # (A `frame_review: true` slice is gated here: bug 042.)
         self.write_slice("DRAFT")
         r = self._run_with_gate_env(
             "0", "transition", str(self.spec_md), "045-01",

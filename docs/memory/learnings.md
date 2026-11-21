@@ -1517,3 +1517,27 @@ regressions need a hard, score-based test
 (`Bug041OrientNextStepRoutingTests`). Watch the lexical proxy for incidental
 hits: "release plans" and "step back" each re-matched "the next step in the
 plan".
+
+## Bug 042: a gate keyed on a target state guards one door, not the room
+
+The pre-implementation frame-critique gate checked `new_status ==
+"READY_FOR_REVIEW"`. `workflow.py transition` is a free-form status setter
+(only `DEFERRED`/`ABANDONED` restrict what may follow), so a flagged slice
+refused at `READY_FOR_REVIEW` could name the next state instead and walk
+`DRAFT → READY_FOR_IMPLEMENTATION → IN_PROGRESS` with no bypass and no
+warning (GitHub issue 251). Same shape as bug 039 in `bug.py`: the
+requirement belongs to an **edge** (leaving the pre-implementation zone),
+and it was attached to a **target**. When adding a gate to a helper with no
+enforced ordering, ask "which other targets lie past this one?" and key the
+check on where the slice is coming from. The fix classifies the origin
+(pre-implementation vs. code-already-exists), which also answers the
+back-edge question for free: `REVIEWED`/`RECONCILED → IN_PROGRESS` and an
+`IN_PROGRESS` release start where code exists, so a pre-implementation gate
+does not re-fire and cannot strand a slice in review. Unknown origins fail
+closed. Two things worth knowing next time: the "ungated" lists in a decision
+record go stale the moment a later slice adds a gate upstream of them
+(ADR-0014 §5 predates the frame-critique gate by six days), and
+`frame_review` is a flag the author *declares* — `derive_frame_review` only
+backs the `frame-review-needed` CLI, nothing derives it at `transition`, so
+an unflagged slice with real `## Assumptions` is ungated everywhere
+(open follow-up, needs an ADR-0020 trigger-model decision).

@@ -400,7 +400,9 @@ SKILL.md hand-off is the documented gate.
    default-off. **ADRs are always-on** (OQ3): any ADR gets `frame_review:
    true` unconditionally — the deriver returns `true` for any `adr-*.md`
    path. When the value is `true`, set `frame_review: true` in the slice
-   frontmatter so the gate + `session-plan` dispatch the pass.
+   frontmatter so the gate + `session-plan` dispatch the pass. The gate
+   reads the flag you **declare**; nothing derives it at `transition` time,
+   so a slice left unflagged is ungated however full its `## Assumptions`.
 8. Add rows to `docs/specs/README.md` (or regenerate via `workflow.py status-board`).
 
 ### Picking up a slice
@@ -615,6 +617,25 @@ Bypass it for a deliberate out-of-band flow by setting
 `JIG_REVIEW_EVIDENCE_GATE=0` (also `false`/`off`/`no`) — the status still
 transitions and the `DONE` dependency check still runs; only the evidence
 check is skipped.
+
+**The pre-implementation frame-critique gate (slice 064-03 /
+[ADR-0020](../../docs/decisions/adr-0020-spec-frame-hardening.md); edge-keyed
+since bug 042).** A slice that declares `frame_review: true` needs a
+`frame-critique` verdict of `pass` to enter `READY_FOR_REVIEW`, **and** to
+leave the pre-implementation states (`DRAFT` / `READY_FOR_REVIEW` /
+`READY_FOR_IMPLEMENTATION`) for anything past `READY_FOR_REVIEW` —
+`READY_FOR_IMPLEMENTATION`, `IN_PROGRESS`, or a jump straight to a review
+state (a re-stamp of `READY_FOR_IMPLEMENTATION` and a `--release` to it
+count: neither skips the gate; release such a slice to `DRAFT`). Skipping
+`READY_FOR_REVIEW` therefore does not skip the gate; with a
+`pass` on record the skip is still allowed. Moves that start where code
+already exists are not re-gated on it: the review back-edges
+(`REVIEWED` / `RECONCILED` → `IN_PROGRESS`), an `IN_PROGRESS` release back to
+`READY_FOR_IMPLEMENTATION`, and the normal walk to `DONE`. A re-pickup from
+`READY_FOR_IMPLEMENTATION` is checked again, and the earlier `pass` still
+clears (a back-edge does not make a frame-critique verdict stale). Unflagged
+slices are unaffected and may skip states freely. Same bypass:
+`JIG_REVIEW_EVIDENCE_GATE=0`, logged as a `review-evidence` gate bypass.
 
 After all required passes pass:
 
