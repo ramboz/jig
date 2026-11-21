@@ -45,6 +45,7 @@
 | 039 | reviewed-fixing-back-edge-rejected | medium | standard | DONE | yes | skills/bug-fix/test_bug.py::Bug039ReviewBackEdgeTests | claude/github-issue-235-review-b2cf03 |  |  |
 | 040 | semantic-index-suggestion-repeats-per-worktree | medium | standard | DONE | yes | hooks/scripts/test_jig_semantic_index.py::Bug040RepoScopedSuggestionTests | claude/github-issue-231-review-229fa0 |  |  |
 | 041 | orient-fires-on-mid-session-whats-next | medium | standard | DONE | yes | skills/orient/test_orient_skill_surface.py::Bug041MidSessionScopeTests | claude/jig-orient-whats-next-6768fe |  |  |
+| 042 | frame-critique-gate-skipped-past-ready-for-review | high | standard | DONE | yes | skills/spec-workflow/test_workflow.py::Bug042FrameGateSkipTests | claude/agitated-mayer-b120c5 |  |  |
 
 ## Terminal — closed (not fixed as bugs)
 
