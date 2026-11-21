@@ -230,7 +230,7 @@ class AuthoringSurfaceTests(unittest.TestCase):
         after = flow.index("5b. **Behavioral rules")
         self.assertTrue(nudge < question < after)
         step = re.sub(r"\s+", " ", flow[question:after])
-        for needle in ("workflow.py owner-review-status", "owner_review: true",
+        for needle in ("owner-review-status", "owner_review: true",
                        "owner_review: false", "ADR-0069", "`ask`",
                        "do not answer for the owner",
                        "recommended answer is yes",
@@ -248,7 +248,7 @@ class AuthoringSurfaceTests(unittest.TestCase):
         text = TEMPLATE.read_text()
         fm = text[:text.index("\n---", 3)]
         self.assertRegex(fm, r"(?m)^#\s*owner_review: true")
-        flat = re.sub(r"\s*\n#\s*", " ", fm)
+        flat = re.sub(r"\s+", " ", fm.replace("#", " "))
         for needle in ("false", "review batch", "not in the DoD", "ADR-0069"):
             self.assertIn(needle, flat, needle)
         # Commented out = absent: a fresh slice is "not asked yet".

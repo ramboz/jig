@@ -326,6 +326,46 @@ SKILL.md hand-off is the documented gate.
    [ADR-0049](../../docs/decisions/adr-0049-design-fidelity-routing-to-originating-spec.md)
    for the full routing rationale; this step adds no new mechanism — teeth
    stay anchored to the existing `design_review` flag.
+5a-2. **Owner-review question (spec 124-02 /
+   [ADR-0069](../../docs/decisions/adr-0069-owner-review-human-attested-evidence.md)).**
+   For each slice you just wrote, run:
+
+   ```bash
+   python3 "${CLAUDE_PLUGIN_ROOT}/skills/spec-workflow/workflow.py" \
+     owner-review-status "docs/specs/NNN-<slug>/spec.md" "<slice-fragment>"
+   ```
+
+   When it prints `ask`, the slice looks UI-related and nobody has said
+   whether the owner wants to try it. **Ask the owner**: "Do you want to
+   try this slice yourself, on a real device or in the real UI, before it
+   is reconciled?" Then write their answer in the slice frontmatter:
+   `owner_review: true` for yes, `owner_review: false` for no. You do not
+   answer for the owner, and you do not leave the flag absent to avoid the
+   question: an absent flag means "not asked", and `transition` and
+   `session-plan` keep repeating the question until it has a value.
+
+   A yes adds the owner-review pass to the `REVIEWED` batch (see "After
+   implementation"): the owner tries the slice while the automated reviews
+   run, and a rejection lands before any reconciliation document is
+   written. That is where an owner's hands-on check belongs — with the
+   review batch, not in the DoD after `RECONCILED`.
+
+   When the slice sets `design_review: true` (step 5a) the recommended
+   answer is yes, because the slice ships a screen. It still does not set
+   the flag: the pass creates a gate only the owner can clear, so the owner
+   decides.
+
+   "UI-related" is a cheap, stated rule, not a judgment: the slice sets
+   `design_review: true`, or its title, goal, DoR or acceptance criteria
+   contain one of these terms (whole words, any case, optional plural):
+   `ui`, `ux`, `gui`, `user interface`, `screen`, `button`, `dialog`,
+   `modal`, `mockup`, `wireframe`, `css`, `stylesheet`, `frontend`,
+   `front-end`, `tap`, `click`, `swipe`, `responsive`, `viewport`, `dark
+   mode`, `tooltip`, `toast`, `dropdown`, `checkbox`, `text field`, `input
+   field`, `form field`, `animation`, `accessibility`, `a11y`, `screen
+   reader`, `widget`, `navbar`, `tab bar`, `microcopy`, `real device`.
+   A false positive costs one question; if the list misses a slice the
+   owner wants to try, set the flag by hand.
 5b. **Behavioral rules (optional, spec 118).** For stateful or role-dependent
    work, use the slice template's table to name operation/control, actor,
    state/precondition, outcome, rationale, and owning AC. Omit it when it adds
