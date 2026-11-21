@@ -627,7 +627,7 @@ def render_blockers(checks: dict) -> str:
     if checks["test_status"] == "could_not_run":
         blockers.append(
             "- Tests could not be run (`tdd.py run` exit 2 with a runner "
-            "detected). Fix the build or the test environment first."
+            "detected or declared). Fix the build or the test environment first."
         )
     # Slice 019-01: skip the deviation-log blocker when the caller
     # opted in via --no-deviation-log. The check still runs and shows

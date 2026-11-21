@@ -1,25 +1,24 @@
 ---
 slice: 123-01 — exit-contract
 pass: compliance
-verdict: needs-changes
+verdict: pass
 reviewer: jig:reviewer
-reviewed_at: 2026-11-21T02:50:06Z
+reviewed_at: 2026-11-21T02:55:04Z
 prompt_source: review.py implementation docs/specs/123-custom-test-command-contract/spec.md exit-contract <7 deliverables>
 ---
 
-VERDICT: needs-changes
+VERDICT: pass
 
 REASONING:
-The production code meets every AC. In `tdd.py`, `_custom_exit` maps everything except 0 and 1 to 2 and prints one contract line of about 230 characters as the last stderr line, in both branches. The selector branch checks the no-match line only on exit 1. Parse errors, undecodable output and helper crashes all exit 2. In `land.py`, `could_not_run` is separate from `warn`/`red`/`not_run`, a blank `.jig/test-command` counts as a declared runner, the row quotes `tdd.py`, and `has_blocker` goes through `tests_block`. The bug-fix gate tests run the real `tdd.py`. Two AC7 sub-claims are not proven by tests: one test can pass with the feature removed, and nothing checks the final verdict end to end. One docstring contradicts the contract.
+Round 3 (round 1 and round 2 returned needs-changes; their findings are folded in and listed in the slice deviation log, items 7 and 8). Every acceptance criterion for 123-01 is met in the current tree. `_custom_exit` maps only 0 and 1 straight through and turns everything else into exit 2, with a single contract line on stderr (about 230 characters). Both custom branches route through it, and the no-match check runs only on exit 1, so exit 2 reports the contract line first. Each AC6a path exits 2: an unparsable file, undecodable output (`errors="replace"`) and a helper crash in `main`. In `land.py`, `check_tests` adds `could_not_run` for a detected or declared runner, `tests_block` feeds `has_blocker`, the readiness row quotes `tdd.py`'s reason, and the servo suggestion stays silent for the new status.
+
+The tests run the real `tdd.py` for AC1-6, AC6a and AC7, and cover the listed edge cases: a killed command (SIGKILL), exit 2 plus a no-match line, a blank or comment-only file, and the pytest module missing (a shadowing module). None is vacuous: removing the feature turns each one red. No test-quality signal fired.
 
 SPECIFIC ISSUES:
-- skills/slice-land/test_land.py — `test_could_not_run_keeps_the_servo_suggestion_silent` depends on the machine: with no servo marker, `render_servo_suggestion` returns "" whether or not `"could_not_run"` is in the silent tuple. Use the 072-02 fixture (XDG_STATE_HOME + marker).
-- skills/slice-land/test_land.py — AC7 says "the verdict is not GO", but no test runs `prepare()` with `could_not_run` and asserts exit 1; reverting `has_blocker` to `test_status == "red"` keeps every test green.
-- skills/tdd-loop/test_tdd.py — the class docstring says "any other non-zero status stays red", the opposite of the contract tested.
-- skills/slice-land/land.py — the COULD NOT RUN row always says "a test runner was detected"; for a blank `.jig/test-command` `detect` found none. Minor.
-- skills/slice-land/test_land.py — `_custom_command` puts `sys.executable` in the command without `shlex.quote`. Robustness nit.
+- skills/slice-land/land.py:628-631 — Low/nit: the blocker line says "exit 2 with a runner detected"; the readiness row says "detected or declared". Optional wording alignment.
+- skills/slice-land/land.py:311-314,340-365 — Medium (design, already recorded in deviation 2): the reason travels in the module-level global `_could_not_run_detail`. Works for the one in-process caller and its reset is tested; accepted and recorded, so not blocking.
 
 RECONCILIATION NOTES:
-- The reason reaches the report through a module-level global `_could_not_run_detail` instead of a wider `check_tests` return; record in the deviation log.
-- `land.py` (file presence) and `tdd.py detect` classify a blank `.jig/test-command` differently; record it.
-- The `REVIEWED` green check is deliberately unchanged (bug 043); confirm in the deviation log.
+- The deviation log records the main departures (polarity, slice-land scope, AC6a, blank file as declared runner, global detail, `errors="replace"` covering built-in targeted runs, the D4 behaviour change).
+- Optionally note that the `render_blockers` wording was narrower than the row's.
+- AC5's "selector without `{test}`" part is covered by the existing bug 021 test, not a new Spec123 test.

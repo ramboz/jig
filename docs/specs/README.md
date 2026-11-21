@@ -401,7 +401,7 @@ Advisory (ADR-0040 auditability — never blocks). Regenerated from `reviews/sli
 
 - **0** pass(es) recorded `not-shown` (selection step did not run — the kill-criterion-1 defect signal).
 - **25** pass(es) recorded `non-interactive` (declared no-orchestrator / CI).
-- **20** shown-and-declined anomaly(ies) (a high-confidence richer skill was shown and not applied):
+- **22** shown-and-declined anomaly(ies) (a high-confidence richer skill was shown and not applied):
   - `088-project-orientation/slice-02-arch.md` — applied `none`; declined: arch-review
   - `088-project-orientation/slice-02-craft.md` — applied `none`; declined: arch-review, independent-review, pr-review, scout-pr-review
   - `113-copilot-third-host/slice-02-arch.md` — applied `none`; declined: arch-review
@@ -422,3 +422,5 @@ Advisory (ADR-0040 auditability — never blocks). Regenerated from `reviews/sli
   - `122-arch-pass-escalation-and-rounds/slice-01-craft.md` — applied `pr-review`; declined: arch-review, independent-review, scout-pr-review
   - `122-arch-pass-escalation-and-rounds/slice-02-craft.md` — applied `unknown`; declined: arch-review, independent-review, pr-review, scout-pr-review
   - `122-arch-pass-escalation-and-rounds/slice-03-craft.md` — applied `pr-review`; declined: arch-review, independent-review, scout-pr-review
+  - `123-custom-test-command-contract/slice-01-craft.md` — applied `pr-review`; declined: arch-review, independent-review, scout-pr-review
+  - `123-custom-test-command-contract/slice-02-craft.md` — applied `pr-review`; declined: arch-review, independent-review, scout-pr-review

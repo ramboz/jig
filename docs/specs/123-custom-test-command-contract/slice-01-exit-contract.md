@@ -160,6 +160,10 @@ The original spec is preserved above. Implementation notes:
    detects as pytest) and a runner binary missing. The row quotes the
    reason; the ways out are installing the runner or a `.jig/test-command`.
    Called out in the PR body.
+   Compliance round 3 passed; per its notes the blocker line now also says
+   "detected or declared", and AC5's no-`{test}` refusal is covered by the
+   existing bug 021 test (`test_selector_without_placeholder_is_refused_exit_2`),
+   not a new Spec123 test.
 10. **Red before green.** The 123-01 tests in `test_tdd.py` and `test_bug.py`
    were written first and failed (6 tdd failures/errors, 1 bug failure)
    before `_custom_exit` existed; the land tests failed (2 failures, 2 errors)
