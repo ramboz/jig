@@ -27,9 +27,9 @@ changed since its last result.
 recommends cutting a pass.
 
 **DoR:**
-- ✅ 126-02 DONE, with at least one audited test-set run for compliance and
+- ⬜ 126-02 DONE, with at least one audited test-set run for compliance and
   craft.
-- ✅ A pinned fingerprint fixture (a minimal spec, slice and bug record) is
+- ⬜ A pinned fingerprint fixture (a minimal spec, slice and bug record) is
   agreed for `evals/reviewer-recall/fixture/`.
 
 **Assumptions:** None beyond spec A1–A2.
@@ -105,11 +105,11 @@ recommends cutting a pass.
   happen to bug-review when no test case came from a bug fix.
 - Results from two models print as two tables.
 
-**Sibling hooks, not dependencies.** If spec 125 (off / observe / enforce)
-lands, the CI notice can register as an observe-mode check instead of a bare
-annotation. If spec 127 (diff-triggered review rules) lands, "this diff
-touches a reviewer prompt block, so re-score" can become one of its rules.
-This slice needs neither.
+**Sibling hook, not a dependency.** If spec 125 (off / observe / enforce)
+lands, AC5's re-score notice can register as an observe-mode check instead
+of a bare annotation. That is its host if it needs one, not a spec 127 review
+rule: it would not meet 127's two-occurrence bar, and rules address
+reviewers, not developers. This slice does not need it.
 
 **DoD:**
 - [ ] All ACs pass; full test suite green (no regressions).

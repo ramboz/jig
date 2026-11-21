@@ -34,8 +34,6 @@ set is unchanged unless the gate is later promoted (ADR-0070 §5).
   `review.py implementation`).
 - ✅ `tdd.py run` records nothing (spec A1); a custom command's `{test}`
   token is dropped on a full run (`skills/tdd-loop/tdd.py:392`).
-- ⬜ If 124-02 has landed, reuse its revision-plus-digest helper for AC2
-  instead of adding a second one (spec A2).
 
 **Acceptance Criteria:**
 
@@ -51,7 +49,10 @@ set is unchanged unless the gate is later promoted (ADR-0070 §5).
    the paths and contents of untracked, non-ignored files, leaving out the
    specs record tree (`project_layout.specs_dir`,
    `skills/_common/project_layout.py:144`), so that recording verdicts and the
-   review flow's own slice edits do not make a green run stale.
+   review flow's own slice edits do not make a green run stale. This is
+   129-01's own working-tree digest, not 124-02's deliverable-manifest helper:
+   it identifies the tree a test run saw, not a set of named deliverables
+   (spec A2).
 3. **One check, six results.** A shared `_common` predicate returns:
    `green` (record for the current identity, exit 0); `red` (current
    identity, exit 1); `stale` (the latest record is for another identity);

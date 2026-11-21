@@ -337,10 +337,10 @@ what the rules are and who may change them (see Recommended Decision §7).
 
 - Should a matched rule be able to *require* a pass or a person (for example,
   pull in the arch pass)? The post's item 6 implies checks can pull in
-  reviewers, and ADR-0070 §4 and spec 125 leave "review rules that pull in a
-  reviewer" to this ADR. This ADR answers it for a check inside an existing
-  pass, with its reason shown; requiring an extra pass or a person stays
-  open, and pass selection stays flag-driven.
+  reviewers, and ADR-0070 §4 and spec 125 point here for it. This ADR
+  answers it for a check inside an existing pass, with its reason shown;
+  requiring an extra pass or a person stays open, and pass selection stays
+  flag-driven.
 - Should a newly promoted rule start in ADR-0070's `observe` mode (stamped but
   not injected) until its shown rate is known?
 - Besides bug records, should candidates come from reverts or maintainer

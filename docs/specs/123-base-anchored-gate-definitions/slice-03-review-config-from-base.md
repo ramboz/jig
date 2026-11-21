@@ -28,7 +28,7 @@ refuse. A new `_common` module and a changed read path for `review_config`,
 hence `arch_review`.
 
 **DoR:**
-- ✅ ADR-0068 Accepted (spec preamble).
+- ⬜ ADR-0068 Accepted (spec preamble).
 - ✅ Every `review.*` read goes through `review_config._raw_review_block`
   (`skills/_common/review_config.py:79-105`), consumed by
   `_resolve_richer_for_pass`, `_substrate_lines` and the prompt subcommands in
@@ -48,7 +48,10 @@ that applies (the same choice as `pull_request_target` in 123-02).
 
 1. **One seam.** A new `_common` module exposes `resolve_base(project_dir)`,
    `read_at_base(project_dir, relpath)` → text plus `source`
-   (`base` / `working-tree`), the ref used, and a reason when it fell back; and
+   (`base` / `working-tree`), the ref used, and a reason when it fell back —
+   exactly one of `absent_at_base` (the base resolved but has no such file),
+   `no_base` (a git repository with no resolvable base) or `not_a_git_repo`,
+   so a consumer such as 127-01 AC3 can tell them apart; and
    `modified_on_branch(project_dir, relpaths)` → the subset changed against the
    merge base with the base, counting commits, uncommitted edits and untracked
    files. It never raises and never fetches.

@@ -126,7 +126,10 @@ A `PreToolUse` / `PostToolUse` hook refuses edits to definition files.
 1. **Principle.** A gate's definition — the data and the job that decide
    pass or fail — is read from the base ref the change targets, never from the
    change. Where a gate cannot read the base, it falls back to the working tree
-   and says so.
+   and says so. One exception: when the file is absent at the base because the
+   branch adds it, and it would judge the change that adds it, a consumer may
+   treat it as absent instead of falling back (spec 127's rules file;
+   [123-03](../specs/123-base-anchored-gate-definitions/slice-03-review-config-from-base.md) BR-3).
 2. **What counts as a definition, now.** The governance job and its
    protected-path list; the `review.*` config and any in-repo rubric it names.
    Spec 127's review rules will be read the same way. Other gates opt in through

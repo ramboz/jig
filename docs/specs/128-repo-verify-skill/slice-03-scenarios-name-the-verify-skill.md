@@ -1,6 +1,6 @@
 ---
 status: DRAFT
-dependencies: [128-01]
+dependencies: [128-01, 124-03]
 last_verified: 2026-11-21
 kind: feature
 ---
@@ -25,10 +25,12 @@ through it.
 point 5 — reference, not gate. Stays inside spec 118's non-goals: no
 frontmatter field, parser or gate; the new line is optional body text the
 reviewer reads. The same line is what earns ADR-0069's `Verified-by: verify`
-token (ADR-0073 point 5); spec 124's renderer reads it, not this slice.
+token (ADR-0073 point 5); this slice adds that rule to spec 124's renderer
+(AC5).
 
 **DoR:**
-- ✅ 128-01 DONE (the contract and its folders are fixed).
+- ⬜ 128-01 DONE (the contract and its folders are fixed).
+- ⬜ 124-03 DONE (the stamp renderer and its token slots exist).
 - ✅ spec 118's surfaces exist: the template's scenario section
   (`templates/docs/specs/slice-template.md:56-79`), spec-workflow step 5c
   (`skills/spec-workflow/SKILL.md:336-347`), the compliance block
@@ -60,6 +62,16 @@ token (ADR-0073 point 5); spec 124's renderer reads it, not this slice.
    runtime evidence") and `templates/docs/workflow.md.template` each gain one
    sentence naming the `verify` skill; host packages are rebuilt and
    `build_host_packages.py --check` passes.
+5. **The stamp renderer earns `verify`.** Spec 124-03's token renderer gains
+   ADR-0073 point 5's rule: it emits `verify` when the slice's verification
+   scenario has a `Produced via:` line naming the `verify` skill, at least one
+   parsed step, every step `pass`, and a `Code revision / dirty-change
+   identity:` revision equal to the commit `Verified-at` names. 124-01 AC4
+   deliberately skips the scenario's revision; this slice adds that check for
+   the `verify` value only, so the Test plan row and BR-6's `scenario` token
+   are unchanged. `verify` takes the slot 124-03 AC1 reserves after
+   `scenario` (`tests`, `review`, `scenario`, `verify`; `none` alone). The
+   rule reuses the renderer's existing scenario reading; no new parser.
 
 **Edge cases to cover explicitly:**
 - A legacy slice with no scenario: the implementation prompt is unchanged
@@ -68,6 +80,8 @@ token (ADR-0073 point 5); spec 124's renderer reads it, not this slice.
   reviewer reports it as unverified evidence, the same as any missing
   evidence reference today.
 - A project with no `verify` skill: no note about bypassing it.
+- A scenario produced via the `verify` skill, every step `pass`, whose
+  revision is missing or differs from `Verified-at`: no `verify` token.
 
 ### Behavioral rules (optional)
 
@@ -76,6 +90,8 @@ token (ADR-0073 point 5); spec 124's renderer reads it, not this slice.
 | BR-1 | Review a scenario | Compliance reviewer | Scenario says "Produced via: verify skill" | Check path exists and outcomes match exit code | Evidence has a source a reader can re-run | 3 |
 | BR-2 | Review a scenario | Compliance reviewer | Project has a `verify` skill; scenario used another tool | Note, not a blocker | Keep the know-how in one place without adding a gate | 3 |
 | BR-3 | Review a slice | Compliance reviewer | No scenario, or no `Produced via` line | No blocker for absence alone | Spec 118 BR-3 stands | 1, 3 |
+| BR-4 | Render the stamp | `land.py` (124-03 renderer) | Scenario produced via the `verify` skill, every step `pass`, revision equal to `Verified-at` | `verify` token present | ADR-0073 point 5; ADR-0069 §4 reserved it | 5 |
+| BR-5 | Render the stamp | `land.py` (124-03 renderer) | Produced another way, a step not `pass`, or revision missing or different | No `verify` token | Only fresh evidence from the skill earns it | 5 |
 
 **DoD:**
 - [ ] All ACs pass; full test suite green (no regressions).
@@ -105,8 +121,9 @@ from the count.
       compress the spec's Active-specs entry.
 
 **Anti-horizontal-phasing check:** after this slice, an author writing a
-verification scenario is sent to the project's `verify` skill, and the
-compliance reviewer can tell whether the evidence came from it.
+verification scenario is sent to the project's `verify` skill, the
+compliance reviewer can tell whether the evidence came from it, and a landing
+whose fresh scenario came from it is stamped `verify`.
 
 ### Deviation log (after reconciliation)
 

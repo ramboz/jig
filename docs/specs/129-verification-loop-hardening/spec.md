@@ -103,9 +103,9 @@ project, and none to jig.
 - **A2 — spec 124 leaves the pre-review run to this spec (grounded in its
   draft).** Spec 124's non-goals list "Running tests before review (spec
   129)", and it does not reuse that run for its landing stamp because it is on
-  an earlier commit. 129-01 uses spec 118's identity shape (revision plus a
-  digest of uncommitted changes), the same shape 124-02 uses for deliverables,
-  and shares the helper with 124-02 whichever lands first.
+  an earlier commit. 129-01 keeps its own working-tree digest (129-01 AC2)
+  rather than sharing 124-02's deliverable-manifest helper: it identifies the
+  tree a test run saw, not a set of named deliverables.
 - **A3 — spec 125-01 gives new gates a resolver and an observe event
   (grounded in its draft, not built).** 125-01's resolver lives at
   `skills/_common/gate_mode.py` with a registry of name, env var, default mode

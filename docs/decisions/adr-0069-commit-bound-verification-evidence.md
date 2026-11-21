@@ -266,7 +266,8 @@ A small file per landed slice, e.g.
 - **The reviewer reads the deliverables soon after the prompt is built.** An
   edit between prompt build and the reviewer's read would be missed.
 - **ADR-0070 will offer a mode that an existing report-only check can be
-  registered under.** ADR-0070 is Proposed and spec 125 is not drafted yet.
+  registered under.** ADR-0070 is Proposed and spec 125 is drafted (DRAFT),
+  not built.
 
 ## Kill criteria
 

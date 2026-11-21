@@ -25,8 +25,8 @@ says `not-run` until the owner fills it in; jig never overwrites it.
 points 1–4 and 6.
 
 **DoR:**
-- ✅ ADR-0073 Accepted.
-- ✅ Host-loader probe recorded in this slice: on Claude Code, Codex and
+- ⬜ ADR-0073 Accepted.
+- ⬜ Host-loader probe recorded in this slice: on Claude Code, Codex and
   Copilot CLI, a project `SKILL.md` carrying an extra `verify-command:` key
   loads and is listed (spec A2). If any host refuses it, settle ADR-0073's
   `metadata:` open question first and update AC2.

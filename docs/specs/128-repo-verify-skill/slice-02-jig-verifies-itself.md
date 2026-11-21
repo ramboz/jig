@@ -29,7 +29,7 @@ verifier, the linter and the status board; **Teardown** = delete the
 temporary project.
 
 **DoR:**
-- ✅ 128-01 DONE (the contract's shape and the stub template exist).
+- ⬜ 128-01 DONE (the contract's shape and the stub template exist).
 - ✅ The pieces exist and run offline: `scaffold.py` (greenfield, plugin
   mode), `workflow.py new --no-push` / `transition` / `status-board`,
   `tdd.py run`, `review.py implementation` / `record-review`,

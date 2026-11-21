@@ -175,8 +175,8 @@ an unprobed frontmatter key) are each small and handled below.
    verification scenario whose `Produced via:` line names the `verify` skill,
    with every step `pass` and a code revision equal to the commit the stamp
    names. A scenario produced any other way earns ADR-0069's `scenario` token,
-   not `verify`. Reading the line is spec 124's renderer's job (it already
-   reads scenario outcomes); spec 128 adds no parser.
+   not `verify`. Slice 128-03 adds the rule to spec 124's renderer, which
+   already reads scenario outcomes; spec 128 adds no parser.
 6. **Discovery:** the stub is a genuine project skill, not a jig baseline.
    ADR-0040 D2's rule is unchanged (`jig-` prefix = jig baseline); the module
    docstring's "every skill a scaffold writes is `jig-` prefixed" is corrected
@@ -232,7 +232,13 @@ it to `governance.PROTECTED_PATHS` (`skills/scaffold-init/governance.py:60-67`).
 - **Hosts pick a project `verify` skill by its description before a commit.**
   Reported by the post for Claude Code; not probed for any host.
 - **servo 049 can work with a whole-app command** (no per-case input). servo
-  spec 049 is still a stub, so this is unverified.
+  spec 049 is drafted, and its slice 049-01 needs exactly point 3: one
+  no-argument `verify-command:`, looked up in `.claude/skills/verify/` then
+  `.agents/skills/verify/`, with exit `1` read as the app's check failing and
+  any other non-zero exit as an environment error. Not yet built, so still
+  unverified in use. A served-app, URL or per-case input contract (what servo
+  design-eval would need) is out of scope for this ADR and stays an open
+  question.
 
 ## Kill criteria
 
@@ -245,8 +251,10 @@ it to `governance.PROTECTED_PATHS` (`skills/scaffold-init/governance.py:60-67`).
 - Agents on a host never invoke the project skill before committing, even when
   it is filled in: the skill is the wrong carrier on that host; revisit B or C
   there.
-- servo 049 needs per-case input that no opt-in extension can express without
-  every project implementing it.
+- servo 049-01 cannot work with point 3 as written (one no-argument
+  `verify-command:` from the two project folders; exit `1` a failed check,
+  other non-zero an environment error), and closing the gap needs input that
+  no opt-in extension can express without every project implementing it.
 
 ## Open questions
 
@@ -258,9 +266,11 @@ it to `governance.PROTECTED_PATHS` (`skills/scaffold-init/governance.py:60-67`).
   Agent Skills format is understood to allow a free-form `metadata` map (not
   verified here); every jig SKILL.md uses flat keys. Decided by the 128-01
   host probe.
-- **Per-case input for servo.** If servo 049 needs it, an opt-in `{input}`
-  placeholder mirroring `.jig/test-command`'s `{test}` (`tdd.py:46-47`, bug
-  021) would keep it optional. Not built until servo 049 asks.
+- **Per-case input, a served app or a URL for servo.** Out of scope here:
+  servo 049-01 needs none of them, but servo design-eval would. An opt-in
+  `{input}` placeholder mirroring `.jig/test-command`'s `{test}`
+  (`tdd.py:46-47`, bug 021) would keep per-case input optional. Not built
+  until a servo spec asks.
 - **Is the verify skill a protected check definition?** A change that edits
   the skill can change the check that judges it (R-002 mechanism 9). Belongs to
   ADR-0068's scope.

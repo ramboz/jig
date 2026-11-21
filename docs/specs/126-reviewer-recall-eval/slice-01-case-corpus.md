@@ -29,11 +29,11 @@ clears ADR-0071's size floor. New bug records capture `introduced_by:`.
 untouched) and D2 (only `introduced_by:` on the record).
 
 **DoR:**
-- ✅ [ADR-0071](../../decisions/adr-0071-reviewer-recall-eval.md) Accepted.
-- ✅ The extractor runs on a clone with full history. The drafting clone was
+- ⬜ [ADR-0071](../../decisions/adr-0071-reviewer-recall-eval.md) Accepted.
+- ⬜ The extractor runs on a clone with full history. The drafting clone was
   shallow (64 commits), so the introducing commits named by bugs 029 and 039
   (`a247f76`, `31cbcb4e`) could not be resolved there.
-- ✅ The owner has agreed who writes answer keys. Proposed: the owner writes
+- ⬜ The owner has agreed who writes answer keys. Proposed: the owner writes
   or approves each one. Test-set keys freeze with the test-set version.
 - ✅ The bug record template is `_record_text` in `skills/bug-fix/bug.py:223`.
   Its closure inventory already asks for "Relevant history inspected"

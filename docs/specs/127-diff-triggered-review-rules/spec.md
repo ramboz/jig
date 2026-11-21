@@ -89,7 +89,7 @@ This spec builds that loop on surfaces jig already has:
 - **Siblings.**
   - [Spec 126](../126-reviewer-recall-eval/spec.md) (reviewer recall eval) is
     the optional detectability check for a candidate and the measure of whether
-    rules help. Nothing here depends on it.
+    rules help (126-02's optional rules arm). Nothing here depends on it.
   - [Spec 124](../124-commit-bound-verification-evidence/spec.md)-02 captures
     the reviewed commit and a deliverables digest when the prompt is built.
     When that capture exists, 127-03 records the shown rule ids there, at

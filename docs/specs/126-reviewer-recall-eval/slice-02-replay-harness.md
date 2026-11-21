@@ -28,9 +28,9 @@ and the control flag rate.
 (stages). ADR-0071 rules 3–5 and 8.
 
 **DoR:**
-- ✅ 126-01 DONE, and `reviewer_recall.py extract` reports `power: ok`. Below
+- ⬜ 126-01 DONE, and `reviewer_recall.py extract` reports `power: ok`. Below
   the floor this slice does not start (ADR-0071 kill criterion).
-- ✅ Spec A4 probed and the flags recorded in this slice. A headless host run
+- ⬜ Spec A4 probed and the flags recorded in this slice. A headless host run
   in a scratch directory must:
   - (a) be limited to Read/Glob/Grep;
   - (b) leave out user-global config, plugins and hooks;
@@ -45,20 +45,23 @@ and the control flag rate.
 
 1. **Each case gets a fresh, leak-free scratch repo.** For each case, `run`
    builds a new two-commit git repo in a temp directory:
-   - commit 1 is `base_commit`'s tree, on branch `main`;
+   - commit 1 is `base_commit`'s tree, on branch `main`, with an
+     `origin/main` ref pointing at it so spec 123-03's base resolution
+     (`resolve_base`) finds the same base during replay;
    - commit 2 is `case_commit`'s tree, on `HEAD`, with a neutral message.
 
-   Commit 2 has the review-time artifacts stripped:
+   Both commits have any `review.*_skill` config stripped, so the base read
+   and the working tree both give today's baseline prompts. Commit 2 also has
+   the review-time artifacts stripped:
    - the case slice's `reviews/slice-NN-*.md`, or for a bug case its
      `docs/bugs/reviews/` records;
    - the slice file's text from `### Deviation log` on;
    - the slice's `status:` reset to `IN_PROGRESS` (`FIXING` for a bug), with
-     its DoD boxes unticked;
-   - any `review.*_skill` config.
+     its DoD boxes unticked.
 
    Observable: a test inspects a built repo. It has exactly two commits and
-   none of the stripped artifacts, and `git merge-base main HEAD` returns
-   commit 1 (spec A2).
+   none of the stripped artifacts, `git merge-base main HEAD` returns
+   commit 1 (spec A2), and `origin/main` resolves to commit 1.
 2. **Prompts are today's baseline, built by today's code.** The harness
    imports the eval checkout's `review.py` builders and calls them on the
    scratch repo with `richer_skill=None` and `non_interactive=True`. The
@@ -119,6 +122,16 @@ and the control flag rate.
    makes a model call. `scripts/test_reviewer_recall.py` covers AC1–AC7 with
    injected reviewer and judge runners, the
    `orchestrator_selection_probe.py` pattern.
+9. **Optional rules arm (only once 127-01 lands).** `run --rules <file>`
+   replays the craft and bug-review passes — the prompts 127-01 changes —
+   twice per case: once with `<memory>/review-rules.md` removed from both
+   commits, and once with `<file>` written into both, so 127-01 reads it at
+   the base. It prints each stage's `k/n` and the control flag rate for both
+   arms, and the recall difference. A rule whose provenance cites the case's
+   own bug is dropped from that case's rules arm, and the drop is counted.
+   `--plan` counts both arms. This is the measurement ADR-0072's first kill
+   criterion and spec 127 rely on. Until 127-01 lands, `--rules` is not
+   offered.
 
 **Edge cases to cover explicitly:**
 - An inconclusive run is excluded from `n`, never counted as a miss.

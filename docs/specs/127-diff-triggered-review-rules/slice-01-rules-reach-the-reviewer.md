@@ -71,7 +71,9 @@ under review cannot edit them.
      would fall back to the working tree (ADR-0072 §4). If the branch adds the
      file, the prompt says its rules apply after merge.
    - **No base resolves, or not a git repository:** no selection runs. The
-     prompt carries one line, `Review rules: unavailable (<reason>)`.
+     prompt carries one line, `Review rules: unavailable (<reason>)`, with
+     123-03's reason (`no_base` or `not_a_git_repo`; `absent_at_base` is the
+     case above).
    - **Under `JIG_BASE_DEFINITIONS=0`:** the working-tree copy is read, as for
      every base-anchored definition.
 4. **Selection matches the diff.** The changed set is taken against the merge
@@ -112,8 +114,11 @@ under review cannot edit them.
 8. **The file is a protected path.** `governance.PROTECTED_PATHS` lists
    `docs/memory/review-rules.md`, mirroring how `docs/conventions.md` is
    listed. The scaffolded CODEOWNERS and `scaffold.json.protected_paths` mirror
-   it, and the existing governance tests are updated. The generated host
-   packages are rebuilt, so `scripts/build_host_packages.py --check` passes.
+   it, and the existing governance tests are updated. If 123-01 has landed,
+   jig's own governance plane (the four artifacts 123-01 pins) is
+   re-rendered in the same change, so 123-01's drift test stays green. The
+   generated host packages are rebuilt, so
+   `scripts/build_host_packages.py --check` passes.
 
 **Edge cases to cover explicitly:**
 - A slice whose diff edits `review-rules.md` itself: selection uses the base

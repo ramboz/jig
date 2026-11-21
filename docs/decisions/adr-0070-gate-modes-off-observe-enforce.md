@@ -150,8 +150,10 @@ session, the next attempt passes.
 4. **A refusal says why.** Every block and would-block names the gate, the
    rule it enforces (ADR or spec), why this case tripped it, the mode and
    where it came from, and the ways forward. That is the post's "it should say
-   why", applied to gates. Review rules that pull in a reviewer belong to
-   [ADR-0072](./adr-0072-diff-triggered-review-rules.md).
+   why", applied to gates. Say-why checks inside existing review passes
+   belong to spec 127 ([ADR-0072](./adr-0072-diff-triggered-review-rules.md));
+   pulling in an extra pass or a person stays open (ADR-0072 open
+   question 1).
 5. **Promotion is deliberate and recorded.** `gate-stats` reports blocked,
    would-block, bypassed and overridden counts per gate and lists recent
    fires for false-positive review. A gate moves `observe → enforce` (or back)

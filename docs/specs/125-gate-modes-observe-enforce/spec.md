@@ -114,11 +114,14 @@ spec answers with the mechanism, not a gate: registering 124's staleness
 report or an "unverified landing" check as a gate is its own decision, born in
 `observe` on this resolver, and would be the first user of the anti-stuck
 valve.
-[127](../127-diff-triggered-review-rules/spec.md) owns review rules that pull
-in a reviewer and say why. [129](../129-verification-loop-hardening/spec.md)
+[127](../127-diff-triggered-review-rules/spec.md) owns say-why checks inside
+existing review passes; pulling in an extra pass or a person stays open
+(ADR-0072 open question 1). [129](../129-verification-loop-hardening/spec.md)
 owns the three-round cap, the escalate-to-a-person counterpart of the
-anti-stuck valve. PR #230's rule `advisory` / `enforced` states map onto
-`observe` / `enforce` (ADR-0070, open question 2); its per-rule fire counts
+anti-stuck valve, and 129-01 registers a new `tests-before-review` gate on
+this resolver, born in `observe` mode. PR #230's rule `advisory` /
+`enforced` states map onto `observe` / `enforce` (ADR-0070, open
+question 2); its per-rule fire counts
 and 125-02's per-gate counts both extend `gate-stats` and should share one
 table shape.
 

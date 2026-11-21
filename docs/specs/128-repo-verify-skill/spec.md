@@ -47,17 +47,19 @@ part of that line, recorded in ADR-0073, and it stays inside the rest:
   project's agent runs the skill, and servo spec 049 may call the command.
   The one exception is jig's own repository, where jig is the project.
 - **No new slice frontmatter field and no parser.** 128-03 adds one optional
-  line to the scenario body, read by the reviewer.
+  line to the scenario body, read by the reviewer and by 124's existing
+  scenario reading in the stamp renderer.
 - **No mandate.** An unfilled stub reports `not-run`, which spec 118 already
   treats as "not a pass", not as a failure.
 
-**Non-goals.** No commit gate for verify runs (spec 125). No stamp writing:
-ADR-0073 defines what earns ADR-0069's `Verified-by: verify` token, and spec
-124's renderer emits it. No seeding of existing projects — they copy the template by
-hand until a `migrate` step is asked for (ADR-0073 Open questions). No
-per-case input for servo (ADR-0073 Open questions). No change to
-`governance.PROTECTED_PATHS` (ADR-0068's scope). No Codex or Copilot run of
-jig's own verify journey in 128-02 (Claude plugin mode first).
+**Non-goals.** No commit gate for verify runs (unowned — spec 125 supplies modes only; see R-002 open questions). No new stamp
+writer: ADR-0073 defines what earns ADR-0069's `Verified-by: verify` token,
+and 128-03 adds the rule to 124's renderer, which emits it. No seeding of
+existing projects — they copy the template by hand until a `migrate` step is
+asked for (ADR-0073 Open questions). No per-case input for servo (ADR-0073
+Open questions). No change to `governance.PROTECTED_PATHS` (ADR-0068's
+scope). No Codex or Copilot run of jig's own verify journey in 128-02
+(Claude plugin mode first).
 
 ## Assumptions
 
@@ -108,13 +110,15 @@ its own observable result:
   slice's lifecycle.
 - **128-03 (Rules):** the slice template, spec-workflow and the compliance
   review point runtime evidence at the verify skill, and a scenario says
-  whether its evidence came through it.
+  whether its evidence came through it; the slice also adds the `verify`
+  stamp rule to 124's renderer.
 
 No Spike: the one open host question (A2) is a probe in 128-01's DoR, not an
 investigation. **Anti-horizontal-phasing:** 128-01 alone gives new projects
 the skill; 128-02 alone gives jig contributors a real end-to-end check; 128-03
 alone makes existing scenarios name their source. 128-02 and 128-03 depend on
-128-01 only for the contract's shape.
+128-01 only for the contract's shape; 128-03 also depends on 124-03, whose
+renderer it extends.
 
 ## Slices
 

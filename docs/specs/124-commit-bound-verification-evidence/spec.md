@@ -66,7 +66,8 @@ Context):
 
 ### Non-goals
 
-- A commit gate, or any blocking on verification (spec 125).
+- A commit gate (unowned — spec 125 supplies modes only; see R-002 open
+  questions), or any other blocking on verification (spec 125).
 - The `verify` skill and what earns the `verify` token (spec 128).
 - Running tests before review (spec 129).
 - Binding bug-record evidence. The bug craft and security passes don't go

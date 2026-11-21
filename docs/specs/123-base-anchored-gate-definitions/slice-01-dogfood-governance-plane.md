@@ -26,7 +26,7 @@ own PRs get the protected-path signal its adopters get.
 armed** (ADR-0051), and arming is the owner's decision, not this slice's.
 
 **DoR:**
-- ✅ ADR-0068 Accepted (spec preamble).
+- ⬜ ADR-0068 Accepted (spec preamble).
 - ✅ `governance.render_codeowners(owner=...)`, `render_governance_workflow()` and
   `render_governance_doc()` exist (`skills/scaffold-init/governance.py:140`,
   `:168`, `:243`); the CLI exposes `render-codeowners` / `render-workflow` /

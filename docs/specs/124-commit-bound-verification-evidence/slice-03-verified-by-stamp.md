@@ -39,7 +39,8 @@ landing record, mirrored as message lines).
 
 1. **One renderer, closed vocabulary.** A `_common` module derives the tokens
    (rules below) and renders `Verified-by: <tokens>` (order: `tests`,
-   `review`, `scenario`; `none` alone), `Verified-at: <full HEAD sha>`, and,
+   `review`, `scenario`, then a reserved `verify` slot — `verify` is added by
+   128-03; `none` alone), `Verified-at: <full HEAD sha>`, and,
    when given, `Verification-note: <one line>`. It also parses them back. An
    unknown token, or `none` combined with another token, is a parse error
    that names the token.
@@ -103,7 +104,7 @@ landing record, mirrored as message lines).
 | BR-4 | `review` token | `land.py` | a required pass is missing, not `pass`, or `stale` | absent | A bypassed gate or stale review shows in history | AC1 |
 | BR-5 | `review` token | `land.py` | required records clear but are unbound (recorded before 124-02) | present; the Test plan marks them unbound | Staleness can't be shown; same as today's gate (ADR-0069 open question 5) | AC1 |
 | BR-6 | `scenario` token | `land.py` | at least one parsed step and every step `pass` (124-01 AC4) | present | Runtime evidence was recorded | AC1 |
-| BR-7 | `verify` token | — | any | not emitted by this slice; accepted by the parser | ADR-0073 point 5 defines what earns it (a scenario `Produced via:` the verify skill, every step `pass`, revision equal to `Verified-at`); the renderer gains that rule once spec 128 lands | AC1 |
+| BR-7 | `verify` token | — | any | not emitted by this slice; accepted by the parser | ADR-0073 point 5 defines what earns it (a scenario `Produced via:` the verify skill, every step `pass`, revision equal to `Verified-at`); 128-03 adds the rule to this renderer | AC1 |
 | BR-8 | `none` | `land.py` | no token earned | `Verified-by: none`, alone | Absence is recorded, not implied | AC1 |
 | BR-9 | landing | `land.py` | stamp is `none` | same blockers and exit code as today | The stamp is a record, not a gate | AC7 |
 
