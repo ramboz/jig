@@ -666,6 +666,29 @@ def _owner_review_flag(spec_path, slice_fragment: str) -> bool:
 
 OWNER_REVIEW_PASS = "owner-review"
 
+# `review.py owner-review` (the ask) stamps this on the slice each time the
+# owner is asked. After a reopen, an owner verdict clears only if the owner
+# was asked again AFTER the reopen — a reply that arrives late but answers
+# the earlier ask is about the earlier build (ADR-0069 decision 6).
+OWNER_ASKED_FIELD = "owner_review_asked_at"
+
+
+def owner_ask_stale_problem(asked_at, reopened_at) -> str:
+    """Return a problem when the review batch was reopened and the owner
+    has not been asked since, else "". No reopen stamp → no requirement."""
+    if not str(reopened_at or "").strip():
+        return ""
+    reopened = _parse_iso8601(reopened_at)
+    asked = _parse_iso8601(asked_at)
+    if reopened is not None and asked is not None and asked > reopened:
+        return ""
+    when = str(asked_at or "").strip() or "never recorded"
+    return (f"the owner was last asked at {when}, not after the review "
+            f"batch was reopened ({REOPENED_FIELD} {reopened_at}) — an "
+            "answer to the earlier ask is about the earlier build. Run "
+            "`review.py owner-review` again, tell the owner what changed, "
+            "and record their new answer")
+
 # (label, what it holds, regex that finds a non-empty value). TRIED/SURFACE
 # hold their value on the label's line; the quote is a blockquote under it.
 _OWNER_REVIEW_PARTS = (
@@ -820,6 +843,12 @@ def validate_evidence(spec_path, slice_fragment: str, stage: str) -> list:
                     if freshness:
                         problems.append(freshness)
             if pass_name == OWNER_REVIEW_PASS:
+                if not stale:
+                    late = owner_ask_stale_problem(
+                        _slice_field(spec_path, slice_fragment,
+                                     OWNER_ASKED_FIELD), reopened_at)
+                    if late:
+                        problems.append(late)
                 try:
                     incomplete = owner_review_problem(
                         path.read_text(encoding="utf-8"))

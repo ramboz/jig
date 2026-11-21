@@ -68,6 +68,21 @@ class AskTests(OwnerReviewBase):
                        "silence", "record nothing", "deliberateness"):
             self.assertIn(phrase, low, phrase)
 
+    def test_ask_stamps_when_the_owner_was_asked(self):
+        path = self.spec.parent / "slice-01-entry.md"
+        r = run_review("owner-review", str(self.spec), "900-01")
+        self.assertRegex(path.read_text(),
+                         r"(?m)^owner_review_asked_at: \d{4}-\d\d-\d\dT")
+        self.assertIn("owner_review_asked_at", r.stderr)
+        self.assertIn("record every non-`pass` verdict", r.stdout)
+        self.assertIn("answers the earlier ask", r.stdout)
+
+    def test_ask_on_an_unflagged_slice_stamps_nothing(self):
+        path = self.spec.parent / "slice-01-entry.md"
+        path.write_text(path.read_text().replace("owner_review: true\n", ""))
+        run_review("owner-review", str(self.spec), "900-01")
+        self.assertNotIn("owner_review_asked_at", path.read_text())
+
     def test_ask_refuses_an_unknown_slice(self):
         r = run_review("owner-review", str(self.spec), "999-99")
         self.assertEqual(r.returncode, 2)
@@ -178,6 +193,38 @@ class ReopenBatchTests(OwnerReviewBase):
         self.assertEqual(len(stale), 1, check.stderr)
         self.assertIn("not newer", stale[0])
         self.assertIn("ask the owner first", stale[0])
+
+    def test_late_reply_to_an_earlier_ask_does_not_clear(self):
+        # Asked (T0) → craft rejects (T1, reopen) → the owner's reply to the
+        # T0 ask arrives and is recorded after the fix. It is about the old
+        # build, so it must not clear until the owner is asked again.
+        path = self.spec.parent / "slice-01-entry.md"
+        path.write_text(path.read_text().replace(
+            "owner_review: true\n",
+            "owner_review: true\n"
+            "owner_review_asked_at: 2026-01-01T00:00:00Z\n"
+            "review_reopened_at: 2026-01-02T00:00:00Z\n"))
+        self.record_other("compliance", "pass")
+        self.record_other("craft", "pass")
+        self.assertEqual(self.record().returncode, 0)
+        check = run_review("check-reviews", str(self.spec), "900-01")
+        self.assertEqual(check.returncode, 2, check.stdout)
+        self.assertIn("[owner-review]", check.stderr)
+        self.assertIn("answer to the earlier ask", check.stderr)
+        # Asking again (after the reopen) makes a fresh answer count.
+        ask = run_review("owner-review", str(self.spec), "900-01")
+        self.assertEqual(ask.returncode, 0, ask.stderr)
+        self.assertEqual(self.record().returncode, 0)
+        check = run_review("check-reviews", str(self.spec), "900-01")
+        self.assertEqual(check.returncode, 0, check.stderr)
+
+    def test_no_reopen_means_no_ask_time_requirement(self):
+        self.record_other("compliance", "pass")
+        self.record_other("craft", "pass")
+        self.assertEqual(self.record().returncode, 0)
+        self.assertNotIn("owner_review_asked_at", self.slice_text())
+        check = run_review("check-reviews", str(self.spec), "900-01")
+        self.assertEqual(check.returncode, 0, check.stderr)
 
     def test_owner_rejection_stamps_too(self):
         r = self.record(verdict="needs-changes")

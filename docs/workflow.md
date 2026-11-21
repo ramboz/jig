@@ -510,8 +510,12 @@ a non-`pass` verdict for *any* `REVIEWED`-stage pass stamps
 stamp stops clearing — the owner's included, because the fix changes the
 build they tried. Tell the owner what changed when you ask again; they may
 say they do not need to try it again, and that answer is recorded in their
-words. The same rule holds when no verdict failed: if what the owner tried
-changes after their answer, ask again.
+words. Running `review.py owner-review` records when the owner was asked
+(`owner_review_asked_at`); after a reopen, an owner verdict clears only if
+they were asked again afterwards, so a late reply to the earlier ask does
+not count. Record every rejection on such a slice before fixing it — the
+record is what reopens the batch. The same rule holds when no verdict
+failed: if the build changes after the owner was asked, ask again.
 
 The exception is an **escalated arch finding**: an arch verdict whose
 `[blocker]` entry starts with `ESCALATE:` is a decision only a person can

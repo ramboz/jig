@@ -666,8 +666,12 @@ owner again (say what changed) and record the new answer. On an
 pass reopens the whole batch: `record-review` stamps `review_reopened_at`
 on the slice and every verdict recorded before it stops clearing,
 including an owner `pass` given before the fix. The owner may reply that
-they do not need to try it again; record that in their words. If what the
-owner tried changes after their answer for any other reason, ask again.
+they do not need to try it again; record that in their words. The ask is
+timestamped (`owner_review_asked_at`), and after a reopen an owner verdict
+clears only if they were asked again afterwards — a late reply to the
+earlier ask is about the earlier build. On such a slice, record every
+rejection before fixing it (the record is what reopens the batch). If the
+build changes after the owner was asked for any other reason, ask again.
 
 **Recovering from a failed review.** A `fail`/`needs-changes` verdict — or
 a `[blocker]`-tagged craft/arch finding, which is recorded as a non-`pass`

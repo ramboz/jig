@@ -69,7 +69,11 @@ any reconciliation document is written.
    passes to re-run and that the owner must be asked again. An owner
    `pass` recorded before that stamp no longer clears `REVIEWED`. A `pass`
    verdict, a `reconciliation` verdict, and any verdict on an unflagged
-   slice stamp nothing.
+   slice stamp nothing. `review.py owner-review` on a flagged slice stamps
+   `owner_review_asked_at`; once a reopen stamp exists, an owner `pass`
+   clears only if the owner was asked again after it, so a late reply to
+   the earlier ask does not clear. With no reopen stamp there is no
+   ask-time requirement.
 8. **`workflow.py session-plan` shows the pass as waiting on the owner.**
    For a flagged slice the plan lists `owner-review` directly after
    `implement` and before `compliance`, marked as a question for the owner

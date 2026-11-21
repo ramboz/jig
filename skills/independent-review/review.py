@@ -2077,7 +2077,8 @@ def build_owner_review_ask(spec_path: Path, slice_label: str,
     return f"""# Owner review — slice {slice_label}
 
 This slice sets `owner_review: true`: the owner tries it themselves before
-it is reconciled. This pass has no reviewer subagent. You ask the owner, a
+it is reconciled. Running this command records on the slice that the owner
+is being asked now (`owner_review_asked_at`), so run it when you ask. This pass has no reviewer subagent. You ask the owner, a
 person answers, and you record their words.
 
 ## When
@@ -2113,9 +2114,14 @@ What there is to try is the slice itself ({slice_path}):
   said.
 - With no person to ask (an unattended run), record nothing. The slice
   waits.
-- If what the owner tried changes after their answer, ask again and say
-  what changed. They may say they do not need to try it again; record that
-  in their words.
+- If the build changes after you asked — before or after the owner
+  answered — run this command again, ask again and say what changed. A
+  reply that arrives late but answers the earlier ask is about the earlier
+  build; do not record it as the answer to this one. The owner may say
+  they do not need to try it again; record that in their words.
+- On this slice, record every non-`pass` verdict from any review pass
+  before fixing (do not just fix and re-run): that record is what reopens
+  the batch.
 
 ## Record the answer
 
@@ -2155,6 +2161,20 @@ def owner_review_ask(args) -> int:
             f"note: slice {loc.label} does not set `owner_review: true`, so "
             f"the REVIEWED gate does not require this pass. Set the flag if "
             f"the owner wants to try the slice before it is reconciled.\n")
+    if flagged and loc.path.name.startswith("slice-"):
+        # ADR-0069 decision 6: leave a record of WHEN the owner was asked,
+        # so a late reply to an earlier ask cannot clear a reopened batch.
+        try:
+            atomic_write_text(loc.path, _set_frontmatter_field(
+                loc.text, _evidence.OWNER_ASKED_FIELD,
+                _evidence.now_iso8601()))
+            sys.stderr.write(
+                f"stamped {_evidence.OWNER_ASKED_FIELD} on {loc.path.name} "
+                f"(the owner is being asked now)\n")
+        except OSError as exc:
+            sys.stderr.write(
+                f"warning: could not stamp {_evidence.OWNER_ASKED_FIELD} "
+                f"({exc})\n")
     text = loc.text[loc.start:loc.end]
     if text.startswith("---"):
         end = text.find("\n---", 3)

@@ -358,8 +358,12 @@ Rules for the orchestrator:
 - **One rejection reopens the batch.** On an `owner_review: true` slice,
   recording a non-`pass` verdict for any REVIEWED-stage pass stamps
   `review_reopened_at`; verdicts recorded before it stop clearing, the
-  owner's included. If what the owner tried changes after their answer for
-  any other reason, ask again and say what changed.
+  owner's included. So record every rejection before fixing it — do not
+  just fix and re-run. The ask command stamps `owner_review_asked_at`, and
+  after a reopen the owner's verdict clears only if they were asked again
+  afterwards: a late reply to the earlier ask is about the earlier build.
+  If the build changes after the owner was asked for any other reason, ask
+  again and say what changed.
 
 The record is a deliberateness signal, not proof that a person tried
 anything: an agent can write the file (ADR-0011). It puts the owner's

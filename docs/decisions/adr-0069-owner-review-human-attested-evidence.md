@@ -155,12 +155,29 @@ records it and settles the details.
    verdict recorded up to that moment stops clearing: the automated passes
    are re-run and the owner is asked again, with a summary of what changed.
    The owner may answer that they do not need to try it again; that is
-   their call and is recorded in their words. This rule is limited to
-   flagged slices; other slices keep today's behaviour (re-run only the
-   pass that failed). It does not catch a change made without any
-   non-`pass` verdict (general code-staleness stays deferred, ADR-0014
-   Scope); the ask and the docs state the rule for that case: if what the
-   owner tried changes after their answer, ask again.
+   their call and is recorded in their words.
+
+   The time a rejection is recorded does not say which build the owner
+   tried: automated reviewers answer in minutes and the owner later, so a
+   reply can arrive after the stamp and still be about the build from
+   before the fix. The ask is therefore recorded too. `review.py
+   owner-review` stamps `owner_review_asked_at` on the slice each time it
+   is run, and once a reopen stamp exists an owner verdict clears only if
+   the owner was asked again after it. A late reply to the earlier ask
+   does not clear; the agent has to run the ask again, which is the moment
+   it tells the owner what changed.
+
+   Limits, stated plainly. The rule applies to flagged slices only; other
+   slices keep today's behaviour (re-run only the pass that failed). It
+   keys on a recorded non-`pass` verdict, so on a flagged slice the agent
+   must record every rejection before fixing, not just fix and re-run; the
+   ask and the skill say so, and an agent that skips it leaves no stamp.
+   It does not catch a change made with no rejection at all (general
+   code-staleness stays deferred, ADR-0014 Scope); for that case the ask
+   and the docs state the rule: if the build changes after the owner was
+   asked, ask again. Re-running the ask and then recording an old reply
+   defeats it, as writing the file by hand does; like the rest of this
+   gate it makes that a deliberate act, not an accident (decision 3).
 
 7. **The flag is explicit, and jig asks for it.** `owner_review` has three
    readings: `true` (required), `false` (the owner said no) and absent (not
@@ -222,20 +239,24 @@ that never left `IN_PROGRESS` would carry no stamp.
 1. An `owner-review` record turns up whose quote the owner did not say.
    The agent-writable record is then not a usable deliberateness signal,
    and the pass needs an out-of-band channel or should be withdrawn.
-2. Owners routinely answer the authoring question with yes and then wave
+2. An owner `pass` is found to describe a build other than the one that
+   was reconciled, despite decision 6. Ask-time binding is then not
+   enough and the record must be bound to a commit (see Open questions).
+3. Owners routinely answer the authoring question with yes and then wave
    the check through without trying anything. The pass is then ceremony
    and should become documentation only.
-3. A third lifecycle (bug-fix or refactor) needs the same human pass. That
+4. A third lifecycle (bug-fix or refactor) needs the same human pass. That
    is the ADR-0023 trigger to move it into the shared spine instead of
    copying it.
 
 ## Open questions
 
-- **A change with no failing verdict.** Decision 6 keys on a recorded
-  non-`pass` verdict. A change made after the owner's answer without one
-  (a nit fixed after a `pass`, say) is covered only by the stated rule.
-  Binding the owner's verdict to a commit and comparing at the gate would
-  close it, at the cost of defining "the deliverable" for every project;
-  deferred until a real miss.
+- **A change with no recorded rejection.** Decision 6 keys on a recorded
+  non-`pass` verdict. A change made without one (a nit fixed after a
+  `pass`, or a rejection the agent fixed without recording) is covered
+  only by the stated rule. Binding the owner's verdict to a commit and
+  comparing at the gate would close it, at the cost of defining "the
+  deliverable" for every project and of handling builds the owner tried
+  from an uncommitted tree; deferred until a real miss.
 - **The bug lifecycle.** `bug.py` has its own `REVIEWED` gate and no owner
-  pass. Not needed for issue 254; see kill criterion 3.
+  pass. Not needed for issue 254; see kill criterion 4.
