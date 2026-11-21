@@ -473,3 +473,25 @@ schema.
 
 **Resolution trigger:** AC6's interactivity proxy is changed so non-TTY/agent lands *can* consume the budget (e.g. harness detection), OR a report shows the nudge repeating for a human-TTY land across worktrees. Then repo-scope the breadcrumb by **reusing** bug 040's git-common-dir resolution — generalize `suggestion_state_path` (or factor out its `_git_common_dir`) to take a state-file name, rather than duplicating `git rev-parse --git-common-dir` in `land.py` — keep the TTY gate, and drop the `.jig/servo-hint-shown` ignore entries in `.gitignore` + `scaffold.py` `_GITIGNORE_SECRET_PATTERNS` (keeping them for existing checkouts that still hold one is harmless). Do not act before bug 040's helper has landed on `main`.
 **Origin:** 2026-10-04 bug-040 closure inventory, which flagged `land.py:721` as convergent once-per-project logic.
+
+### Decision: owner-review — bind the owner's verdict to a build, not to the ask time
+
+ADR-0069 decision 6 / spec 124. The owner-review gate ties the owner's
+answer to the ask time (`review_reopened_at` < `owner_review_asked_at` <=
+`reviewed_at`) and reopens the batch only on a recorded non-`pass`
+verdict. Not covered: a change made with no recorded rejection (a nit fixed
+after a `pass`, or a rejection fixed without being recorded), an ask run
+before the fix exists, and an automated `pass` from a parallel reviewer
+that returns after another pass's rejection was recorded (it judged the
+pre-fix build). Closing these needs the record bound to a build or commit
+and compared at the gate, which means defining "the deliverable" per
+project and handling uncommitted trees. **Trigger:** an `owner-review` or
+automated `pass` found to describe a build other than the one reconciled
+(ADR-0069 kill criterion 2).
+
+### Decision: owner-review for the bug-fix lifecycle
+
+ADR-0069 open question. `bug.py` has its own REVIEWED gate and no owner
+pass. **Trigger:** a bug fix whose owner check after landing rejected it,
+or a third lifecycle needing the pass (ADR-0069 kill criterion 4 /
+ADR-0023 third-caller rule).
