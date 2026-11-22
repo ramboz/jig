@@ -41,7 +41,7 @@ you create a note; update its status/promotion when it resolves.
 
 | ID | Topic | Status | Related / Promoted to |
 |----|-------|--------|------------------------|
-| _(none yet)_ | | | |
+| [R-002](R-002-claude-code-verification-assessment.md) | The Claude Code team's verification practices read against jig and servo | CONCLUDED | ADR-0068–0073; specs 123–129; servo ADR-0051–0053 / specs 045–049 |
 
 ## Hand-offs
 

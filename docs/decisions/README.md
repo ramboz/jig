@@ -68,6 +68,12 @@
 - [ADR-0064: Use-case progress rollup lives in jig as a bounded exception](adr-0064-use-case-progress-rollup-in-jig.md) — An owner of a project with many specs cannot tell whether the work is still advancing the product's goals. (2026-10-03, Accepted)
 - [ADR-0066: Component-agnostic design attestation](adr-0066-component-agnostic-design-attestation.md) — Jig needs reusable design attestation without shipping an application's proof of concept. (2026-10-22, Accepted)
 - [ADR-0067: Genesis spec 000 and a stub-free seed](adr-0067-genesis-spec-zero.md) — The worked example `scaffold-init` seeds moves to a genesis spec `000-adopt-jig` with no placeholder spec, so a project's own first spec is `001` instead of `003`. (2026-10-26, Accepted)
+- [ADR-0068: Gate definitions are read from the base ref, not the change under evaluation](adr-0068-base-anchored-gate-definitions.md) — The Claude Code team's verification post puts it plainly: "If a change can modify the check that judges it, the check is broken." Their Code Review reads `REVIEW.md` from the base branch, never from the pull request (PR). (2026-11-21, Proposed)
+- [ADR-0069: Verification evidence is bound to a commit, and none is a recorded value](adr-0069-commit-bound-verification-evidence.md) — Review verdicts bind to the bytes they judged, and every landing records how it was verified, `none` included. (2026-11-21, Proposed)
+- [ADR-0070: Gates ship with off, observe, and enforce modes](adr-0070-gate-modes-off-observe-enforce.md) — jig's refusing gates are binary. (2026-11-21, Proposed)
+- [ADR-0071: Reviewers are measured offline against jig's own bug history](adr-0071-reviewer-recall-eval.md) — jig's reviewer prompts are edited often and never measured. (2026-11-21, Proposed)
+- [ADR-0072: Review rules are structured, diff-triggered, and read-only to the reviewer](adr-0072-diff-triggered-review-rules.md) — [R-002](../research/R-002-claude-code-verification-assessment.md) reads the Claude Code team's verification post against jig. (2026-11-21, Proposed)
+- [ADR-0073: A repo-owned verify skill is the run-the-app contract](adr-0073-repo-verify-skill-contract.md) — Investigation record: [R-002](../research/R-002-claude-code-verification-assessment.md) (mechanism 4, plus the end-to-end half of mechanism 3). (2026-11-21, Proposed)
 
 ## Lightweight decisions
 

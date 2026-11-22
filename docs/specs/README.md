@@ -356,6 +356,27 @@
 | [122-arch-pass-escalation-and-rounds](122-arch-pass-escalation-and-rounds/spec.md) | 122-01 — escalate-stops-the-slice | **DONE** | Arch `[blocker] ESCALATE:` on a non-`pass` record → `record-review` STOP notice + gate says "a person must decide"; clearing stays `verdict: pass` (body read for the message only); orchestrator parks it via `memory.py add-inbox` + `blocked_by:`. |
 | [122-arch-pass-escalation-and-rounds](122-arch-pass-escalation-and-rounds/spec.md) | 122-02 — arch-round-carry-over | **DONE** | A re-run arch prompt names `reviews/slice-NN-arch.md` (read after the reviewer's own review); every arch round ends REASONING with `round: N · open · searched`; jig never parses that line; other passes byte-identical. Owner-approved exception in `conventions.md`. |
 | [122-arch-pass-escalation-and-rounds](122-arch-pass-escalation-and-rounds/spec.md) | 122-03 — one-blocking-rule | **DONE** | Only `pass` clears (ADR-0014 §3); craft/arch/code-health return `pass` when no `[blocker]` remains; the orchestrator records the verdict as returned. Pinned by `OneBlockingRuleTests`. |
+| [123-base-anchored-gate-definitions](123-base-anchored-gate-definitions/spec.md) | 123-01 — dogfood-governance-plane | DRAFT |  |
+| [123-base-anchored-gate-definitions](123-base-anchored-gate-definitions/spec.md) | 123-02 — base-judged-governance-check | DRAFT |  |
+| [123-base-anchored-gate-definitions](123-base-anchored-gate-definitions/spec.md) | 123-03 — review-config-from-base | DRAFT |  |
+| [124-commit-bound-verification-evidence](124-commit-bound-verification-evidence/spec.md) | 124-01 — honest-test-plan | DRAFT |  |
+| [124-commit-bound-verification-evidence](124-commit-bound-verification-evidence/spec.md) | 124-02 — review-freshness | DRAFT |  |
+| [124-commit-bound-verification-evidence](124-commit-bound-verification-evidence/spec.md) | 124-03 — verified-by-stamp | DRAFT |  |
+| [125-gate-modes-observe-enforce](125-gate-modes-observe-enforce/spec.md) | 125-01 — gate-mode-resolver | DRAFT |  |
+| [125-gate-modes-observe-enforce](125-gate-modes-observe-enforce/spec.md) | 125-02 — observe-report-and-promotion | DRAFT |  |
+| [125-gate-modes-observe-enforce](125-gate-modes-observe-enforce/spec.md) | 125-03 — mode-aware-gates-and-override | DRAFT |  |
+| [126-reviewer-recall-eval](126-reviewer-recall-eval/spec.md) | 126-01 — case-corpus | DRAFT |  |
+| [126-reviewer-recall-eval](126-reviewer-recall-eval/spec.md) | 126-02 — replay-harness | DRAFT |  |
+| [126-reviewer-recall-eval](126-reviewer-recall-eval/spec.md) | 126-03 — per-pass-report | DRAFT |  |
+| [127-diff-triggered-review-rules](127-diff-triggered-review-rules/spec.md) | 127-01 — rules-reach-the-reviewer | DRAFT |  |
+| [127-diff-triggered-review-rules](127-diff-triggered-review-rules/spec.md) | 127-02 — bug-candidates-and-promotion | DRAFT |  |
+| [127-diff-triggered-review-rules](127-diff-triggered-review-rules/spec.md) | 127-03 — fire-record-and-pruning | DRAFT |  |
+| [128-repo-verify-skill](128-repo-verify-skill/spec.md) | 128-01 — scaffold-writes-verify-stub | DRAFT |  |
+| [128-repo-verify-skill](128-repo-verify-skill/spec.md) | 128-02 — jig-verifies-itself | DRAFT |  |
+| [128-repo-verify-skill](128-repo-verify-skill/spec.md) | 128-03 — scenarios-name-the-verify-skill | DRAFT |  |
+| [129-verification-loop-hardening](129-verification-loop-hardening/spec.md) | 129-01 — green-tests-before-review | DRAFT |  |
+| [129-verification-loop-hardening](129-verification-loop-hardening/spec.md) | 129-02 — three-rounds-then-a-person | DRAFT |  |
+| [129-verification-loop-hardening](129-verification-loop-hardening/spec.md) | 129-03 — property-tests-where-they-fit | DRAFT |  |
 
 ## Deferred slices
 
