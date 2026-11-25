@@ -159,7 +159,16 @@ pass after, so "there is a regression test" is machine-attested, not claimed. A
 bug already clean on fresh main becomes `RESOLVED_ON_MAIN`; a test already green
 without the fix does not capture the bug — the `→ FIXING` gate refuses it. A
 `tdd.py` env error (exit 2) **fails closed** (gate not satisfied), distinct from
-red. The repository-closure gates make reuse/history discovery and call-site
+red. On a stack `tdd.py` does not auto-detect (Gradle, Maven, Go, Rust…) the
+gate error says so and names the way out: a `.jig/test-command` whose command
+exits 0 when the tests pass, 1 only when a test ran and failed, and anything
+else when it could not run them. jig adds no per-framework runners
+([ADR-0068](../../docs/decisions/adr-0068-no-per-framework-runner-adapters.md));
+the contract and a worked Gradle wrapper are in
+[test-command-recipes.md](../tdd-loop/test-command-recipes.md). A bare build
+command that exits 1 on a compile failure would be recorded as a witnessed
+failing test, so do not use one.
+The repository-closure gates make reuse/history discovery and call-site
 closure durable evidence (see the **Repository-closure inventory** subsection
 under step 2 below).
 
@@ -440,7 +449,10 @@ commit.
   fresh `origin/main`; if the repro is clean there, mark
   `RESOLVED_ON_MAIN` and stop.
 - **`tdd.py` env error fails the gate closed** (exit 2 ≠ red). Fix the
-  environment; don't bypass blindly.
+  environment; don't bypass blindly. "No test runner detected" is the same
+  case: write `.jig/test-command` (see
+  [test-command-recipes.md](../tdd-loop/test-command-recipes.md)) instead of
+  setting `JIG_BUG_TEST_GATE=0`.
 - **Bypass env vars are deliberateness escapes, not the default.**
   `JIG_BUG_DIAGNOSE_GATE=0` / `JIG_BUG_MAIN_CHECK_GATE=0` /
   `JIG_BUG_TEST_GATE=0` / `JIG_REVIEW_EVIDENCE_GATE=0` are for out-of-band

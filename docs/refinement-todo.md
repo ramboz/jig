@@ -485,3 +485,9 @@ schema.
 
 **Resolution trigger:** any project still on embedded slices reports a flagged pass not being required, OR the two slice-status/frontmatter readers are unified (see "unify the two slice-status readers" above) — fix it there by lifting `_split_slice_section` into `_common/parsing.py`.
 **Origin:** bug 042 bug-review + craft, round 1.
+
+### Decision: a generic JUnit-XML report reader for `tdd.py`
+**Deferred — demand-gated ([ADR-0068](decisions/adr-0068-no-per-framework-runner-adapters.md) Option C).** jig would run the project's command and then read JUnit XML reports to decide green / red / nothing ran, instead of trusting the command's exit status. One mechanism would cover Gradle, Maven and several other tools whose exit status cannot tell a failing test from a build failure. Not built: it still needs per-tool knowledge of where reports land and how to keep stale ones out, it adds a second result channel beside the exit code, and one issue (250) has asked. Today that logic lives in the consuming project's wrapper; `skills/tdd-loop/test-command-recipes.md` shows it for Gradle.
+**Resolution trigger:** ADR-0068's first kill criterion: several unrelated projects ship near-identical report-reading wrappers and still get the exit mapping wrong, or a bug record is found whose `red_confirmed_at` was stamped through a custom command on a test that never ran. This is the trigger for a report reader, not for per-framework adapters.
+**Origin:** 2026-11-20, spec 123 / issue 250.
+

@@ -31,7 +31,18 @@ The skill:
   deterministically:
   - `0` — all green
   - `1` — at least one red test (runner started but reported failure)
-  - `2` — could not detect a runner, OR the runner binary is missing
+  - `2` — the tests could not be run: no runner detected, the runner binary
+    is missing, or a custom command exited with anything other than 0 or 1
+
+**Which runners are built in.** The built-in list is closed: pytest, vitest,
+jest and `node --test`. jig does not add an adapter per test framework
+([ADR-0068](../../docs/decisions/adr-0068-no-per-framework-runner-adapters.md)).
+Every other stack (Gradle, Maven, Go, Rust, .NET, Ruby…) connects through one
+file, `.jig/test-command`, whose command follows the same exit contract:
+`0` the tests passed, `1` a test ran and failed, anything else could not run.
+[test-command-recipes.md](test-command-recipes.md) states the contract in full
+and carries one worked example (a Gradle wrapper script that lives in the
+consuming project).
 
 ## The red-green-refactor loop
 
@@ -76,7 +87,11 @@ python3 "${CLAUDE_PLUGIN_ROOT}/skills/tdd-loop/tdd.py" detect [target]
 
 - `target` defaults to `.` when omitted.
 - Stdout: `pytest`, `vitest`, `jest`, or `node` (one line).
-- Exit 2 with stderr `no test runner detected at <target>` if no signal matches.
+- Exit 2 if no signal matches. Stderr starts with `no test runner detected
+  at <target>` and ends with one line that says what to do: create
+  `.jig/test-command`, where `{test}` goes, and what the command's exit
+  status must mean. `run` prints the same lines, and the bug-fix gates quote
+  the last one.
 
 Signals checked (priority order — first hit wins):
 
@@ -183,6 +198,18 @@ the main session) use to actually run the loop. The discipline lives in
   auto-detection. Useful for projects whose test convention doesn't map to
   pytest/vitest/jest (e.g. `python3 scripts/run_tests.py {test}` for jig
   itself).
+- **A custom command's exit status is a three-state contract** (spec 123 /
+  ADR-0068). `0` is green. `1` is red and means *a test ran and failed*: it
+  is the only status read as red, because the bug-fix `FIXING` gate records a
+  witnessed failing test on it. Any other status (a wrapper's deliberate `2`
+  for a build failure, a shell's 126/127, a runner-specific code, a killed
+  process) means the tests could not run: `run` exits 2 and its last stderr
+  line names the status and the contract. So a runner whose failing-test
+  status is not 1 (`cargo test` exits 101, GNU `make` exits 2) needs a small
+  wrapper that maps that status to 1, and a build tool that exits 1 for a
+  compile failure (Gradle, Maven) needs a wrapper that checks a test really
+  ran. jig cannot verify a command's exit 1; see
+  [test-command-recipes.md](test-command-recipes.md).
 - **Targeted runs against a custom command are opt-in** (bug 021). A `{test}`
   token — as its own standalone argument, not embedded in another — marks
   where a `--test` selector is substituted; the token is dropped when no
@@ -190,7 +217,7 @@ the main session) use to actually run the loop. The discipline lives in
   accept a test selector") instead of silently running the whole suite — a
   whole-suite exit code is not evidence about one named test, and the bug-fix
   red→green gates consume this exit code as exactly that. With the token, a
-  **non-zero** exit whose output starts a line with a recognized no-match
+  exit **1** whose output starts a line with a recognized no-match
   report (`no matching tests`, `no test found`, `no tests found`, `your test
   suite must contain at least one test`) maps to exit 2 (`unresolved
   selector`), mirroring the auto-detect runners — a custom command should
@@ -200,6 +227,9 @@ the main session) use to actually run the loop. The discipline lives in
   filesystem signals but the `pytest` module isn't importable, `run` exits
   2 with "not installed" in stderr — not exit 1 (red tests). Fix:
   `pip install pytest`.
-- **Out of scope for slice 006-01:** rspec / `go test` / `cargo test`
-  detection, AC-to-test coverage mapping (deferred to 006-02), pre-commit
-  hooks that block red commits (deferred to 006-03).
+- **No further built-in runners** (ADR-0068). rspec / `go test` /
+  `cargo test` / Gradle / Maven detection is not deferred work: those stacks
+  use `.jig/test-command`. A generic JUnit-XML report reader is recorded in
+  `docs/refinement-todo.md` as a demand-gated option.
+- **Out of scope for slice 006-01:** AC-to-test coverage mapping (deferred to
+  006-02), pre-commit hooks that block red commits (deferred to 006-03).

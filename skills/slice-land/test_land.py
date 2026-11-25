@@ -9,6 +9,7 @@ Or from the skill dir:
 
 import os
 import re
+import shlex
 import subprocess
 import sys
 import tempfile
@@ -2796,6 +2797,30 @@ class ServoSuggestionTests(unittest.TestCase):
                           return_value=interactive):
             return _land.prepare(self.spec, "072-02", target=self.target)
 
+    def test_could_not_run_keeps_the_suggestion_silent_with_servo_present(self):
+        # Spec 123-01: with servo's marker present, only the status guard
+        # keeps the suggestion out of a could-not-run report.
+        self._write_marker()
+        self.assertIn("/servo:scaffold-init",
+                      _land.render_servo_suggestion(self.target, "green"))
+        self.assertEqual(
+            _land.render_servo_suggestion(self.target, "could_not_run"), "")
+
+    def test_prepare_could_not_run_is_not_go(self):
+        # Spec 123-01 AC7: the verdict wiring, not just tests_block().
+        from unittest.mock import patch
+        with patch.object(_land, "_output_is_interactive", return_value=False):
+            with patch.object(_land, "check_tests", return_value=("green", 0)):
+                _r, green_code = _land.prepare(self.spec, "072-02",
+                                               target=self.target)
+            with patch.object(_land, "check_tests",
+                              return_value=("could_not_run", 2)):
+                report, code = _land.prepare(self.spec, "072-02",
+                                             target=self.target)
+        self.assertEqual(green_code, 0)
+        self.assertEqual(code, 1)
+        self.assertIn("Tests could not be run", report)
+
     def test_prepare_interactive_shows_and_writes_marker(self):
         self._write_marker()
         report, _code = self._run_prepare(interactive=True)
@@ -2949,6 +2974,110 @@ class CheckTestsHelperResolutionTests(unittest.TestCase):
         self.assertEqual(
             status, "green",
             f"vendored green suite must report green, got {status} ({code})")
+
+
+
+class Spec123CouldNotRunTests(unittest.TestCase):
+    """Spec 123-01 / ADR-0068: `tdd.py run` exit 2 means two different
+    things. No runner detected stays the non-blocking doc-only `warn`; a
+    runner that exists but could not run (a custom command reporting a build
+    failure, a missing tool) is `could_not_run` and blocks the landing."""
+
+    def setUp(self):
+        self.tmp = tempfile.TemporaryDirectory()
+        self.proj = Path(self.tmp.name)
+
+    def tearDown(self):
+        self.tmp.cleanup()
+
+    def _custom_command(self, code: int) -> None:
+        (self.proj / "exiter.py").write_text(f"raise SystemExit({code})\n")
+        jig = self.proj / ".jig"
+        jig.mkdir()
+        (jig / "test-command").write_text(
+            f"{shlex.quote(sys.executable)} exiter.py {{test}}\n")
+
+    def _checks(self, test_status: str, test_exit: int) -> dict:
+        return {
+            "status_ok": True, "status_actual": "DONE",
+            "test_status": test_status, "test_exit": test_exit,
+            "deviation_log_ok": True, "dod_ok": True,
+            "dod_ticked": 3, "dod_total": 3,
+            "skip_deviation_log": False,
+        }
+
+    def test_custom_command_exit_2_is_could_not_run(self):
+        # AC7, against the real tdd.py.
+        self._custom_command(2)
+        self.assertEqual(_land.check_tests(self.proj), ("could_not_run", 2))
+        # The reason reaches the report: tdd.py's contract line is quoted.
+        self.assertIn("custom test command exited 2",
+                      _land._could_not_run_detail)
+        checks = self._checks("could_not_run", 2)
+        checks["test_detail"] = _land._could_not_run_detail
+        section = _land.render_readiness_section(checks)
+        self.assertIn(".jig/test-command", section)
+        self.assertIn("custom test command exited 2", section)
+
+    def test_blank_test_command_file_is_could_not_run_not_doc_only(self):
+        # `detect` skips a comment-only .jig/test-command, but the file is a
+        # declared runner: the land gate must not show the doc-only warning.
+        (self.proj / ".jig").mkdir()
+        (self.proj / ".jig" / "test-command").write_text("# sh test.sh\n")
+        self.assertEqual(_land.check_tests(self.proj), ("could_not_run", 2))
+
+    def test_pytest_detected_but_module_missing_is_could_not_run(self):
+        # Edge case (spec D4): a project detected as pytest whose pytest
+        # module cannot be imported was the doc-only warning; it now blocks,
+        # and the row carries tdd.py's reason. A shadowing `pytest.py` that
+        # raises ImportError stands in for "not installed" on any machine.
+        from unittest.mock import patch
+        (self.proj / "conftest.py").write_text("")
+        shadow = self.proj / "shadow"
+        shadow.mkdir()
+        (shadow / "pytest.py").write_text("raise ImportError('no pytest')\n")
+        with patch.dict(os.environ, {"PYTHONPATH": str(shadow)}):
+            self.assertEqual(_land.check_tests(self.proj),
+                             ("could_not_run", 2))
+        self.assertIn("not installed", _land._could_not_run_detail)
+
+    def test_detail_is_cleared_by_a_later_check(self):
+        self._custom_command(2)
+        _land.check_tests(self.proj)
+        (self.proj / "exiter.py").write_text("raise SystemExit(0)\n")
+        _land.check_tests(self.proj)
+        self.assertEqual(_land._could_not_run_detail, "")
+
+    def test_custom_command_exit_1_is_red_and_exit_0_green(self):
+        self._custom_command(1)
+        self.assertEqual(_land.check_tests(self.proj)[0], "red")
+        (self.proj / "exiter.py").write_text("raise SystemExit(0)\n")
+        self.assertEqual(_land.check_tests(self.proj)[0], "green")
+
+    def test_no_runner_is_still_the_doc_only_warn(self):
+        # AC8.
+        self.assertEqual(_land.check_tests(self.proj), ("warn", 2))
+        section = _land.render_readiness_section(self._checks("warn", 2))
+        self.assertIn("no test runner detected", section)
+        self.assertEqual(_land.render_blockers(self._checks("warn", 2)), "")
+        self.assertFalse(_land.tests_block("warn"))
+
+    def test_could_not_run_row_is_loud_and_not_doc_only(self):
+        section = _land.render_readiness_section(
+            self._checks("could_not_run", 2))
+        self.assertIn("COULD NOT RUN", section)
+        self.assertIn("NOT a pass", section)
+        self.assertNotIn("[x] Tests", section)
+        self.assertNotIn("no test runner detected", section)
+        self.assertNotIn("doc-only", section)
+
+    def test_could_not_run_is_a_blocker(self):
+        self.assertTrue(_land.tests_block("could_not_run"))
+        self.assertTrue(_land.tests_block("red"))
+        self.assertFalse(_land.tests_block("green"))
+        self.assertFalse(_land.tests_block("not_run"))
+        blockers = _land.render_blockers(self._checks("could_not_run", 2))
+        self.assertIn("could not be run", blockers)
 
 
 # ==================== Cross-ref Class-A backstop (slice 112-01 / ADR-0058) ====================
