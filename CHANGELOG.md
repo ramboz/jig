@@ -1,5 +1,18 @@
 # Changelog
 
+## [2.18.0](https://github.com/ramboz/jig/compare/v2.17.1...v2.18.0) (2026-11-25)
+
+
+### Features
+
+* **independent-review:** stop on escalated arch findings and carry arch rounds ([#252](https://github.com/ramboz/jig/issues/252)) ([87610a9](https://github.com/ramboz/jig/commit/87610a934f8e5da0fcc1486cafebdae0bef33b89))
+* **tdd-loop:** sound .jig/test-command exit contract instead of a Gradle adapter (spec 123, ADR-0068) ([#258](https://github.com/ramboz/jig/issues/258)) ([95c8c98](https://github.com/ramboz/jig/commit/95c8c98621681ea01b0fd2fdcc94092cd8e8e3e7))
+
+
+### Bug Fixes
+
+* **spec-workflow:** gate the frame-critique pass on the edge, not the target (bug 042) ([#255](https://github.com/ramboz/jig/issues/255)) ([da25168](https://github.com/ramboz/jig/commit/da25168d5a4aed182d31746044743a65733ee86b))
+
 ## [2.17.1](https://github.com/ramboz/jig/compare/v2.17.0...v2.17.1) (2026-11-10)
 
 
