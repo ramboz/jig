@@ -486,6 +486,28 @@ schema.
 **Resolution trigger:** any project still on embedded slices reports a flagged pass not being required, OR the two slice-status/frontmatter readers are unified (see "unify the two slice-status readers" above) — fix it there by lifting `_split_slice_section` into `_common/parsing.py`.
 **Origin:** bug 042 bug-review + craft, round 1.
 
+### Decision: owner-review — bind the owner's verdict to a build, not to the ask time
+
+ADR-0069 decision 6 / spec 124. The owner-review gate ties the owner's
+answer to the ask time (`review_reopened_at` < `owner_review_asked_at` <=
+`reviewed_at`) and reopens the batch only on a recorded non-`pass`
+verdict. Not covered: a change made with no recorded rejection (a nit fixed
+after a `pass`, or a rejection fixed without being recorded), an ask run
+before the fix exists, and an automated `pass` from a parallel reviewer
+that returns after another pass's rejection was recorded (it judged the
+pre-fix build). Closing these needs the record bound to a build or commit
+and compared at the gate, which means defining "the deliverable" per
+project and handling uncommitted trees. **Trigger:** an `owner-review` or
+automated `pass` found to describe a build other than the one reconciled
+(ADR-0069 kill criterion 2).
+
+### Decision: owner-review for the bug-fix lifecycle
+
+ADR-0069 open question. `bug.py` has its own REVIEWED gate and no owner
+pass. **Trigger:** a bug fix whose owner check after landing rejected it,
+or a third lifecycle needing the pass (ADR-0069 kill criterion 4 /
+ADR-0023 third-caller rule).
+
 ### Decision: a generic JUnit-XML report reader for `tdd.py`
 **Deferred — demand-gated ([ADR-0068](decisions/adr-0068-no-per-framework-runner-adapters.md) Option C).** jig would run the project's command and then read JUnit XML reports to decide green / red / nothing ran, instead of trusting the command's exit status. One mechanism would cover Gradle, Maven and several other tools whose exit status cannot tell a failing test from a build failure. Not built: it still needs per-tool knowledge of where reports land and how to keep stale ones out, it adds a second result channel beside the exit code, and one issue (250) has asked. Today that logic lives in the consuming project's wrapper; `skills/tdd-loop/test-command-recipes.md` shows it for Gradle.
 **Resolution trigger:** ADR-0068's first kill criterion: several unrelated projects ship near-identical report-reading wrappers and still get the exit mapping wrong, or a bug record is found whose `red_confirmed_at` was stamped through a custom command on a test that never ran. This is the trigger for a report reader, not for per-framework adapters.

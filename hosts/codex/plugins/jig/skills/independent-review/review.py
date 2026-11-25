@@ -71,6 +71,7 @@ from _common import skill_discovery as _skill_discovery
 from _common.atomic_io import atomic_write_text
 from _common.parsing import SliceLookupError
 from _common.parsing import load_slice as _load_slice_common
+from _common.parsing import set_frontmatter_field as _set_frontmatter_field
 
 
 class ReviewError(RuntimeError):
@@ -2001,6 +2002,191 @@ def _record_bug_review(args) -> int:
     return 0
 
 
+# -------- owner-review pass (spec 124-01 / ADR-0069) --------
+
+_OWNER_ARGS = (("tried", "--tried"), ("surface", "--surface"),
+               ("owner_quote", "--owner-quote"))
+
+
+def _owner_review_body(args) -> str:
+    """Build the owner-review record body from the owner's answer. Refuses
+    a missing/blank part and a no-person (`--non-interactive`) run."""
+    if getattr(args, "non_interactive", False):
+        raise ReviewError(
+            "owner-review cannot be recorded with --non-interactive: the "
+            "verdict is the owner's own answer, so with no person to ask "
+            "nothing is recorded and the slice waits")
+    missing = [flag for attr, flag in _OWNER_ARGS
+               if not str(getattr(args, attr, None) or "").strip()]
+    if missing:
+        raise ReviewError(
+            "owner-review needs the owner's answer: missing or blank "
+            + ", ".join(missing) + ". Ask the owner (`review.py "
+            "owner-review <spec> <slice>` prints what to ask) and pass what "
+            "they tried, the device or surface, and their reply quoted "
+            "word for word — never an inferred answer")
+    notes = _read_summary(args, required=False)
+    return _evidence.owner_review_body(
+        args.tried, args.surface, args.owner_quote, args.verdict, notes)
+
+
+def _refuse_owner_args(args) -> None:
+    given = [flag for attr, flag in _OWNER_ARGS
+             if getattr(args, attr, None) is not None]
+    if given:
+        raise ReviewError(
+            f"{', '.join(given)} only apply to --pass owner-review "
+            f"(got --pass {args.pass_name})")
+
+
+def _reopen_owner_flagged_batch(spec: Path, slice_fragment: str,
+                                pass_name: str) -> None:
+    """ADR-0069 decision 6: on an `owner_review: true` slice, a non-`pass`
+    verdict for any REVIEWED-stage pass stamps `review_reopened_at`, so
+    every verdict recorded so far (the owner's included) stops clearing —
+    the fix that follows changes the build they judged. Best-effort: a
+    failure to stamp is reported, never raised."""
+    if pass_name not in _evidence.REVIEWED_STAGE_PASSES:
+        return
+    try:
+        if not _evidence.owner_review_required(spec, slice_fragment):
+            return
+        loc = _load_slice_common(spec, slice_fragment)
+        passes = ", ".join(_evidence.reviewed_passes_for(spec, slice_fragment))
+        atomic_write_text(loc.path, _set_frontmatter_field(
+            loc.text, _evidence.REOPENED_FIELD, _evidence.now_iso8601()))
+    except (OSError, SliceLookupError, _evidence.EvidenceError) as exc:
+        sys.stderr.write(
+            f"warning: could not stamp {_evidence.REOPENED_FIELD} on the "
+            f"slice ({exc}); re-run every review pass and ask the owner "
+            f"again after the fix\n")
+        return
+    sys.stdout.write(
+        f"reopened the review batch: this slice sets owner_review: true, so "
+        f"{_evidence.REOPENED_FIELD} was stamped. After the fix, re-run "
+        f"every review pass ({passes}) and ask the owner again, telling "
+        f"them what changed — verdicts recorded before now no longer "
+        f"clear.\n")
+
+
+def build_owner_review_ask(spec_path: Path, slice_label: str,
+                           slice_path: Path, slice_fragment: str,
+                           slice_text: str) -> str:
+    """The ask for the owner-review pass: what to put to the owner and how
+    to record their answer. Not a subagent prompt — a person answers."""
+    return f"""# Owner review — slice {slice_label}
+
+This slice sets `owner_review: true`: the owner tries it themselves before
+it is reconciled. Running this command records on the slice that the owner
+is being asked now (`owner_review_asked_at`), so run it when you ask.
+
+This pass has no reviewer subagent. You ask the owner, a
+person answers, and you record their words.
+
+## When
+
+Now: as soon as implementation is finished, in parallel with the automated
+review passes. Do not leave it for last and do not start reconciliation
+(deviation log, sweep, decision records) before the owner has answered.
+
+## Ask the owner
+
+Tell the owner how to get the build (branch, URL, install step), then put
+this to them and wait for their reply:
+
+> Slice {slice_label} is ready for you to try. Please try it on a real
+> device or in the real UI and tell me: (1) what you tried, (2) on what
+> device or surface, (3) whether it is good to reconcile as it is, or what
+> needs to change.
+
+What there is to try is the slice itself ({slice_path}):
+
+{slice_text.strip()}
+
+## Rules
+
+- Ask the owner and wait for their answer. Do other work meanwhile; do not
+  answer for them.
+- Record only the owner's reply to this question, and quote it word for
+  word. Never infer a verdict: silence, an earlier general approval, a
+  reply about something else, and your own run of the feature are not
+  answers.
+- If the owner answers in a later session, record it from their own
+  message in that session, never from an agent's notes about what they
+  said.
+- With no person to ask (an unattended run), record nothing. The slice
+  waits.
+- If the build changes after you asked — before or after the owner
+  answered — run this command again, ask again and say what changed. A
+  reply that arrives late but answers the earlier ask is about the earlier
+  build; do not record it as the answer to this one. The owner may say
+  they do not need to try it again; record that in their words.
+- On this slice, record every non-`pass` verdict from any review pass
+  before fixing (do not just fix and re-run): that record is what reopens
+  the batch.
+
+## Record the answer
+
+```bash
+python3 review.py record-review {spec_path} {slice_fragment} \\
+  --pass owner-review --verdict <pass or needs-changes> \\
+  --reviewer "<the owner's name or handle>" \\
+  --prompt-source "review.py owner-review {spec_path} {slice_fragment}" \\
+  --tried "<what they tried>" --surface "<device or surface>" \\
+  --owner-quote "<their reply, word for word>"
+```
+
+`--verdict pass` only when the owner said it is good as it is. Anything
+they want changed is `needs-changes`: the slice stays IN_PROGRESS, you make
+the changes, re-run the automated passes, and ask the owner again. After
+recording, show the owner the recorded file.
+
+This record is a deliberateness signal, not proof that anyone tried
+anything (ADR-0011 / ADR-0069): it exists so the owner can read their own
+quoted answer in the diff and contradict it.
+"""
+
+
+def owner_review_ask(args) -> int:
+    spec = Path(args.spec)
+    if not spec.is_file():
+        sys.stderr.write(f"spec not found: {spec}\n")
+        return 2
+    try:
+        loc = _load_slice_common(spec, args.slice)
+        flagged = _evidence.owner_review_required(spec, args.slice)
+    except (SliceLookupError, _evidence.EvidenceError) as exc:
+        sys.stderr.write(f"{exc}\n")
+        return 2
+    if not flagged:
+        sys.stderr.write(
+            f"note: slice {loc.label} does not set `owner_review: true`, so "
+            f"the REVIEWED gate does not require this pass. Set the flag if "
+            f"the owner wants to try the slice before it is reconciled.\n")
+    if flagged:
+        # ADR-0069 decision 6: leave a record of WHEN the owner was asked,
+        # so a late reply to an earlier ask cannot clear a reopened batch.
+        try:
+            atomic_write_text(loc.path, _set_frontmatter_field(
+                loc.text, _evidence.OWNER_ASKED_FIELD,
+                _evidence.now_iso8601()))
+            sys.stderr.write(
+                f"stamped {_evidence.OWNER_ASKED_FIELD} on {loc.path.name} "
+                f"(the owner is being asked now)\n")
+        except OSError as exc:
+            sys.stderr.write(
+                f"warning: could not stamp {_evidence.OWNER_ASKED_FIELD} "
+                f"({exc})\n")
+    text = loc.text[loc.start:loc.end]
+    if text.startswith("---"):
+        end = text.find("\n---", 3)
+        if end != -1:
+            text = text[end + 4:]
+    sys.stdout.write(build_owner_review_ask(
+        spec, loc.label, loc.path, args.slice, text))
+    return 0
+
+
 def record_review(args) -> int:
     """Write a verdict file for a (slice, pass). Overwrites in place on
     re-record (ADR-0014 §4 — git history is the audit trail, no append)."""
@@ -2042,7 +2228,11 @@ def record_review(args) -> int:
         # also re-validates the slice target and pass name.
         out_path = _evidence.evidence_path(spec, args.slice, args.pass_name)
         slice_label = find_slice_label(spec, args.slice)
-        body = _read_summary(args)
+        if args.pass_name == _evidence.OWNER_REVIEW_PASS:
+            body = _owner_review_body(args)
+        else:
+            _refuse_owner_args(args)
+            body = _read_summary(args)
         if args.pass_name == "design-review" and args.verdict == "pass":
             problem = _evidence.design_freshness_problem(spec, args.slice, body)
             if problem:
@@ -2079,6 +2269,19 @@ def record_review(args) -> int:
     out_path.parent.mkdir(parents=True, exist_ok=True)
     atomic_write_text(out_path, content)
     sys.stdout.write(f"recorded {args.pass_name} verdict → {out_path}\n")
+    if args.pass_name == _evidence.OWNER_REVIEW_PASS:
+        sys.stdout.write(
+            "Show the owner this file so they can confirm it says what "
+            "they said.\n")
+        if args.verdict != "pass":
+            sys.stdout.write(
+                f"STOP — slice {slice_label}: "
+                f"{_evidence.owner_rejection_guidance(args.slice)}\n")
+    if args.verdict != "pass" and not (
+            args.pass_name == "arch" and _evidence.escalations(body)):
+        # An escalated arch verdict waits on a person's decision, not a fix
+        # (spec 122-01), so it does not reopen the batch.
+        _reopen_owner_flagged_batch(spec, args.slice, args.pass_name)
     if args.pass_name == "arch" and args.verdict != "pass":
         # Spec 122-01: an escalated arch verdict is a person's decision, not
         # a finding to fix — say so at the moment it is recorded.
@@ -2482,11 +2685,36 @@ def _build_parser() -> argparse.ArgumentParser:
               "Required — a verdict with no body is refused"),
     )
     prec.add_argument(
+        "--tried", default=None,
+        help="owner-review only: what the owner tried")
+    prec.add_argument(
+        "--surface", default=None,
+        help="owner-review only: the device or surface the owner used")
+    prec.add_argument(
+        "--owner-quote", dest="owner_quote", default=None,
+        help="owner-review only: the owner's reply, word for word")
+    prec.add_argument(
         "--non-interactive", dest="non_interactive", action="store_true",
         help="declare no orchestrator (CI) — records substrate: non-interactive "
              "for a slice-keyed extensible pass (spec 096-05), so a legitimate "
              "no-selection run is not counted as the not-shown defect signal.",
     )
+
+    # Spec 124-01 / ADR-0069: the owner-review ask (a person answers).
+    pown = sub.add_parser(
+        "owner-review",
+        help="print what to ask the owner for the owner-review pass, and "
+             "stamp owner_review_asked_at on the slice (run it when asking)",
+        description=(
+            "Print the question to put to the owner of an "
+            "`owner_review: true` slice, the rules for recording their "
+            "answer, and the record-review command (ADR-0069). Side effect: "
+            "stamps `owner_review_asked_at` on the slice, so an answer "
+            "recorded before this run stops clearing until the owner's "
+            "reply to this ask is recorded. Run it only when asking."),
+    )
+    pown.add_argument("spec", help="path to spec.md")
+    pown.add_argument("slice", help="slice name or fragment")
 
     # Slice 045-02: validate the evidence set for a slice at a stage.
     pchk = sub.add_parser(
@@ -2554,6 +2782,8 @@ def main(argv: list) -> int:
         except Exception as exc:  # noqa: BLE001
             sys.stderr.write(f"review.py failed: {exc}\n")
             return 1
+    if ns.command == "owner-review":
+        return owner_review_ask(ns)
     if ns.command == "check-reviews":
         try:
             return check_reviews(ns)

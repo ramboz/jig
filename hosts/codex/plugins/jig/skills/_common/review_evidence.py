@@ -65,8 +65,12 @@ from _common.parsing import (
 # read-only reviewer ATTESTS an external non-deterministic eval's frozen
 # verdict (servo's design-fidelity composite) — never re-deriving the score
 # (the honesty boundary, ADR-0022).
+# Spec 124-01 / ADR-0069 added the on-demand `owner-review` pass (gated by a
+# slice's `owner_review: true` flag, at REVIEWED): the one pass whose author
+# is a person. Its record carries the owner's quoted answer.
 PASSES = ("compliance", "craft", "arch", "code-health", "reconciliation",
-          "frame-critique", "design-review", "bug-review", "security")
+          "frame-critique", "design-review", "bug-review", "security",
+          "owner-review")
 
 # ADR-0014 §3: allowed verdict values.
 VERDICTS = ("pass", "fail", "needs-changes")
@@ -261,7 +265,8 @@ def evidence_path(spec_path, slice_fragment: str, pass_name: str) -> Path:
 def required_passes(stage: str, *, arch_review: bool,
                     code_health_review: bool = False,
                     frame_review: bool = False,
-                    design_review: bool = False) -> tuple:
+                    design_review: bool = False,
+                    owner_review: bool = False) -> tuple:
     """Return the passes required to enter `stage` (ADR-0014 §5 map).
 
     - ``READY_FOR_REVIEW`` → ``frame-critique`` iff the slice/spec
@@ -274,7 +279,8 @@ def required_passes(stage: str, *, arch_review: bool,
       declared ``arch_review: true``) (+ ``code-health`` iff the slice
       declared ``code_health_review: true`` — slice 060-05) (+
       ``design-review`` iff the slice declared ``design_review: true`` —
-      slice 071-01).
+      slice 071-01) (+ ``owner-review`` iff the slice declared
+      ``owner_review: true`` — spec 124-01).
     - ``RECONCILED`` → ``reconciliation``.
 
     `arch_review` / `code_health_review` / `design_review` are honored
@@ -300,6 +306,8 @@ def required_passes(stage: str, *, arch_review: bool,
             passes.append("code-health")
         if design_review:
             passes.append("design-review")
+        if owner_review:
+            passes.append("owner-review")
         return tuple(passes)
     if stage == "RECONCILED":
         return ("reconciliation",)
@@ -307,6 +315,13 @@ def required_passes(stage: str, *, arch_review: bool,
         f"unknown transition stage '{stage}'; expected READY_FOR_REVIEW, "
         f"REVIEWED or RECONCILED"
     )
+
+
+# Every pass that can gate REVIEWED (always-on + each flag-gated one),
+# derived from the map above so a new REVIEWED pass cannot be missed.
+REVIEWED_STAGE_PASSES = required_passes(
+    "REVIEWED", arch_review=True, code_health_review=True,
+    design_review=True, owner_review=True)
 
 
 def required_bug_passes(stage: str, *, security_surface: bool = False) -> tuple:
@@ -641,6 +656,140 @@ def _design_review_flag(spec_path, slice_fragment: str) -> bool:
     return _review_flag(spec_path, slice_fragment, "design_review")
 
 
+def _owner_review_flag(spec_path, slice_fragment: str) -> bool:
+    """`owner_review:` flag (spec 124-01), same source as
+    `workflow.py:slice_needs_owner_review`."""
+    return _review_flag(spec_path, slice_fragment, "owner_review")
+
+
+def owner_review_required(spec_path, slice_fragment: str) -> bool:
+    """Public reader of the `owner_review:` flag for other modules
+    (review.py). Raises `EvidenceError` when the slice can't be resolved."""
+    return _owner_review_flag(spec_path, slice_fragment)
+
+
+def reviewed_passes_for(spec_path, slice_fragment: str) -> tuple:
+    """The REVIEWED-stage passes this slice's flags require."""
+    return required_passes(
+        "REVIEWED",
+        arch_review=_arch_review_flag(spec_path, slice_fragment),
+        code_health_review=_code_health_review_flag(spec_path, slice_fragment),
+        design_review=_design_review_flag(spec_path, slice_fragment),
+        owner_review=_owner_review_flag(spec_path, slice_fragment))
+
+
+# ---------------------------------------------------------------------------
+# Spec 124-01 / ADR-0069: the owner-review pass — a verdict whose author is
+# a person. The record body carries what the owner tried, on what surface,
+# and their quoted answer. The file is agent-writable, so this is a
+# deliberateness gate (ADR-0011), not proof that a person tried anything.
+# ---------------------------------------------------------------------------
+
+OWNER_REVIEW_PASS = "owner-review"
+
+# `review.py owner-review` (the ask) stamps this on the slice each time the
+# owner is asked. After a reopen, an owner verdict clears only if the owner
+# was asked again AFTER the reopen — a reply that arrives late but answers
+# the earlier ask is about the earlier build (ADR-0069 decision 6).
+OWNER_ASKED_FIELD = "owner_review_asked_at"
+
+
+def owner_answer_predates_ask_problem(reviewed_at, asked_at) -> str:
+    """Return a problem when the owner verdict was recorded before the most
+    recent ask, else "". Re-running the ask means a new answer is pending,
+    so the standing one stops clearing until it is recorded (fail closed).
+    No ask stamp → no requirement (the flag was set by hand or the ask
+    command was never run)."""
+    if not str(asked_at or "").strip():
+        return ""
+    asked = _parse_iso8601(asked_at)
+    reviewed = _parse_iso8601(reviewed_at)
+    # Same-second ask-then-record is the normal flow, so "not older".
+    if asked is not None and reviewed is not None and reviewed >= asked:
+        return ""
+    return (f"this answer (reviewed_at {reviewed_at or '(empty)'}) was "
+            f"recorded before the owner was last asked "
+            f"({OWNER_ASKED_FIELD} {asked_at}) — a new answer is pending. "
+            "Record the owner's reply to that ask")
+
+
+def owner_ask_stale_problem(asked_at, reopened_at) -> str:
+    """Return a problem when the review batch was reopened and the owner
+    has not been asked since, else "". No reopen stamp → no requirement."""
+    if not str(reopened_at or "").strip():
+        return ""
+    reopened = _parse_iso8601(reopened_at)
+    asked = _parse_iso8601(asked_at)
+    if reopened is not None and asked is not None and asked > reopened:
+        return ""
+    when = str(asked_at or "").strip() or "never recorded"
+    return (f"the owner was last asked at {when}, not after the review "
+            f"batch was reopened ({REOPENED_FIELD} {reopened_at}) — an "
+            "answer to the earlier ask is about the earlier build. Run "
+            "`review.py owner-review` again, tell the owner what changed, "
+            "and record their new answer")
+
+# (label, what it holds, regex that finds a non-empty value). TRIED/SURFACE
+# hold their value on the label's line; the quote is a blockquote under it.
+_OWNER_REVIEW_PARTS = (
+    ("TRIED:", "what the owner tried",
+     re.compile(r"(?m)^TRIED:[ \t]*\S")),
+    ("SURFACE:", "the device or surface they used",
+     re.compile(r"(?m)^SURFACE:[ \t]*\S")),
+    ("OWNER SAID:", "the owner's answer, quoted as a `> ` blockquote",
+     re.compile(r"(?m)^OWNER SAID:[ \t]*\n(?:[ \t]*\n)*>[ \t]*\S")),
+)
+
+
+def owner_review_problem(body: str) -> str:
+    """Return a problem string naming each part an owner-review body lacks,
+    or "" when all three are present and non-empty. Shared by the writer
+    (`record-review`) and the gate."""
+    missing = [f"`{label}` ({what})"
+               for label, what, pattern in _OWNER_REVIEW_PARTS
+               if not pattern.search(body or "")]
+    if not missing:
+        return ""
+    return ("owner-review record is missing " + ", ".join(missing)
+            + " — it must carry the owner's own answer")
+
+
+def owner_review_body(tried: str, surface: str, quote: str,
+                      verdict: str, notes: str = "") -> str:
+    """Compose the owner-review record body from the owner's answer."""
+    def one_line(value) -> str:
+        return " ".join(str(value).split())
+
+    quoted = "\n".join(f"> {line.strip()}" if line.strip() else ">"
+                       for line in str(quote).strip().splitlines())
+    body = (f"VERDICT: {verdict}\n\n"
+            f"TRIED: {one_line(tried)}\n\n"
+            f"SURFACE: {one_line(surface)}\n\n"
+            f"OWNER SAID:\n{quoted}\n")
+    if notes.strip():
+        body += f"\nNOTES:\n{notes.strip()}\n"
+    return body
+
+
+def owner_ask_hint(slice_fragment: str) -> str:
+    """How to produce an owner-review record: ask, never just record."""
+    return (f"ask the owner first: `review.py owner-review <spec> "
+            f"{slice_fragment}` prints what to ask; record only their "
+            f"quoted answer, never an inferred one")
+
+
+def owner_rejection_guidance(slice_fragment: str) -> str:
+    """The shared notice for a non-`pass` owner verdict (gate + writer)."""
+    return (
+        "the owner asked for changes. The slice stays IN_PROGRESS: do not "
+        "move it to REVIEWED and do not start reconciliation (no deviation "
+        "log, sweep or decision records yet). Make the changes, re-run the "
+        "automated review passes on the changed deliverable, then ask the "
+        f"owner again (`review.py owner-review <spec> {slice_fragment}`) "
+        "and record their new answer."
+    )
+
+
 def design_freshness_problem(spec_path, slice_fragment: str, body: str) -> str:
     """Shared writer/reuse check for an explicitly selected static contract."""
     try:
@@ -675,6 +824,7 @@ def validate_evidence(spec_path, slice_fragment: str, stage: str) -> list:
         code_health = _code_health_review_flag(spec_path, slice_fragment)
         frame = _frame_review_flag(spec_path, slice_fragment)
         design = _design_review_flag(spec_path, slice_fragment)
+        owner = _owner_review_flag(spec_path, slice_fragment)
     except EvidenceError as exc:
         return [f"invalid slice target: {exc}"]
 
@@ -682,7 +832,8 @@ def validate_evidence(spec_path, slice_fragment: str, stage: str) -> list:
         needed = required_passes(stage, arch_review=arch,
                                  code_health_review=code_health,
                                  frame_review=frame,
-                                 design_review=design)
+                                 design_review=design,
+                                 owner_review=owner)
     except EvidenceError as exc:
         return [str(exc)]
 
@@ -707,6 +858,13 @@ def validate_evidence(spec_path, slice_fragment: str, stage: str) -> list:
                     f"{escalation_guidance(decisions, path)}"
                 )
                 continue
+        if (pass_name == OWNER_REVIEW_PASS and rec.well_formed
+                and not rec.clears):
+            # Spec 124-01: an owner rejection is not "re-record a pass".
+            diagnostics.append(
+                f"[{pass_name}] {path.name}: "
+                f"{owner_rejection_guidance(slice_fragment)}")
+            continue
         problems = list(rec.problems) if not rec.clears else []
         if rec.clears and stage != "READY_FOR_REVIEW":
             # Bug 039: frame-critique (READY_FOR_REVIEW) is a one-time
@@ -724,12 +882,31 @@ def validate_evidence(spec_path, slice_fragment: str, stage: str) -> list:
                     freshness = design_freshness_problem(spec_path, slice_fragment, body)
                     if freshness:
                         problems.append(freshness)
+            if pass_name == OWNER_REVIEW_PASS:
+                if not stale:
+                    asked_at = _slice_field(spec_path, slice_fragment,
+                                            OWNER_ASKED_FIELD)
+                    late = (owner_ask_stale_problem(asked_at, reopened_at)
+                            or owner_answer_predates_ask_problem(
+                                rec.fields.get("reviewed_at", ""),
+                                asked_at))
+                    if late:
+                        problems.append(late)
+                try:
+                    incomplete = owner_review_problem(
+                        path.read_text(encoding="utf-8"))
+                except (OSError, UnicodeError):
+                    incomplete = "owner-review record is unreadable"
+                if incomplete:
+                    problems.append(incomplete)
         for problem in problems:
-            diagnostics.append(
-                f"[{pass_name}] {problem} "
-                f"(produce with: {RECORD_CMD} <spec> {slice_fragment} "
-                f"--pass {pass_name} --verdict pass ...)"
-            )
+            if pass_name == OWNER_REVIEW_PASS:
+                # Never hint "record a pass": the verdict is the owner's.
+                hint = owner_ask_hint(slice_fragment)
+            else:
+                hint = (f"produce with: {RECORD_CMD} <spec> {slice_fragment} "
+                        f"--pass {pass_name} --verdict pass ...")
+            diagnostics.append(f"[{pass_name}] {problem} ({hint})")
     return diagnostics
 
 

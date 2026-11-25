@@ -11,6 +11,14 @@ last_verified:
 #                      # then wire a servo `design-eval` as the done-condition
 #                      # (attest-only at REVIEWED; ADR-0014, ADR-0022,
 #                      # ADR-0049).
+# owner_review: true  # set true when the owner wants to try this slice
+#                     # themselves (real device / real UI) before it is
+#                     # reconciled: their check then runs with the review
+#                     # batch at REVIEWED, not in the DoD after
+#                     # RECONCILED. Set false when they were asked and
+#                     # said no. Leave commented until they answer
+#                     # (absent = not asked; jig asks on UI-related
+#                     # slices). ADR-0069.
 ---
 
 <!-- jig self-defining vocabulary (soft, forward-only): expand each acronym on

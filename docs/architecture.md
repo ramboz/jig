@@ -358,7 +358,7 @@ dropped.
 
 *Roster:*
 - `implementer`: TDD discipline, writes deliverables
-- `reviewer`: read-only, fresh context per review. Fires once per review pass under the multi-perspective flow — always compliance + craft (`pr-review`) + reconciliation, plus the frontmatter-gated passes: arch (`arch_review: true`), code-health (`code_health_review: true`), design-review (`design_review: true`, REVIEWED stage), and frame-critique (`frame_review: true`, the pre-implementation READY_FOR_REVIEW gate). Reused as the agent shape for every pass — no per-pass `pr-reviewer` / `arch-reviewer` agent. The verdicts are durable evidence artifacts that gate the next transition.
+- `reviewer`: read-only, fresh context per review. Fires once per review pass under the multi-perspective flow — always compliance + craft (`pr-review`) + reconciliation, plus the frontmatter-gated passes: arch (`arch_review: true`), code-health (`code_health_review: true`), design-review (`design_review: true`, REVIEWED stage), and frame-critique (`frame_review: true`, the pre-implementation READY_FOR_REVIEW gate). The one REVIEWED-stage pass without a subagent is owner-review (`owner_review: true`, spec 124 / [ADR-0069](decisions/adr-0069-owner-review-human-attested-evidence.md)): the orchestrator asks the owner and records their quoted answer. Reused as the agent shape for every subagent pass — no per-pass `pr-reviewer` / `arch-reviewer` agent. The verdicts are durable evidence artifacts that gate the next transition.
 - `architect`: rare, ADR-style output
 
 All three are reachable as real `subagent_type` values when jig is installed as
@@ -572,8 +572,14 @@ it is not self-hashed.
 Interface contracts between the other modules are deliberately deferred
 — today's coupling is read-only and one-directional (skills read
 templates; helpers read specs; hooks read events; nothing writes across
-the module boundary). Will tighten when the first bidirectional case
-appears.
+the module boundary). One exception: on an `owner_review: true` slice,
+`review.py` (independent-review) writes two frontmatter stamps on the
+slice file — `review_reopened_at` when a REVIEWED-stage pass is recorded
+non-`pass`, and `owner_review_asked_at` when the owner is asked
+(ADR-0069 decision 6). `workflow.py` and `bug.py` also write
+`review_reopened_at`; unifying those writers is part of the deferred
+guard-family work in `docs/refinement-todo.md`. Will tighten when the
+first bidirectional case appears.
 
 ## Data model
 
