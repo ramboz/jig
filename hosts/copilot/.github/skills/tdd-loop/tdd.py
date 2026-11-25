@@ -46,6 +46,34 @@ SHALLOW_SCAN_SKIP_DIRS = {"node_modules", ".git", "dist", "build", "__pycache__"
 # a {test} argv token in .jig/test-command marks where a selector belongs.
 CUSTOM_SELECTOR_PLACEHOLDER = "{test}"
 
+# ADR-0068 / spec 123: the exit contract of a custom command. Only 1 is red.
+CUSTOM_EXIT_CONTRACT = (
+    "0 = tests passed, 1 = a test ran and failed, anything else = could not run"
+)
+
+RECIPES_DOC = "test-command-recipes.md"
+
+# ADR-0068 §3 / spec 123-02: what to do when no built-in runner matches.
+# One line, at most 300 characters: bug.py quotes the last stderr line of a
+# failed run up to that length, so this reaches the bug-fix gate error whole.
+NO_RUNNER_HINT = (
+    "way out: put the test command as the first "
+    "non-comment line of .jig/test-command ({test} = selector); exit "
+    f"{CUSTOM_EXIT_CONTRACT} (a build failure is not 1: a build tool needs "
+    f"a wrapper) - see {RECIPES_DOC} in the tdd-loop skill"
+)
+
+
+def _report_no_runner(target: Path) -> int:
+    """The no-runner dead end: say what jig looked for and the way out."""
+    sys.stderr.write(f"no test runner detected at {target}\n")
+    sys.stderr.write(
+        "jig auto-detects only pytest, vitest, jest and node --test "
+        f"(ADR-0068); recipes: {Path(__file__).resolve().parent / RECIPES_DOC}\n"
+    )
+    sys.stderr.write(NO_RUNNER_HINT + "\n")
+    return 2
+
 
 def _read_json_safe(path: Path) -> dict:
     """Read JSON, swallowing all errors and returning {}. Same as scaffold.py."""
@@ -294,6 +322,24 @@ def _selector_missed(runner: str, returncode: int, output: str) -> bool:
     )
 
 
+def _custom_exit(returncode: int) -> int:
+    """Normalize a custom command's exit status (ADR-0068 §2).
+
+    0 is green and 1 is red. Every other status — a wrapper's deliberate 2,
+    a shell's 126/127, a runner-specific code, death by signal — means the
+    tests could not be run: exit 2, never red. The explanation is the LAST
+    stderr line, one line, because bug.py quotes exactly that line."""
+    if returncode in (0, 1):
+        return returncode
+    sys.stderr.write(
+        f"custom test command exited {returncode}: by the .jig/test-command "
+        f"contract ({CUSTOM_EXIT_CONTRACT}) this is an environment error, "
+        "not a failing test; a command must exit 1 only when a test ran "
+        "and failed\n"
+    )
+    return 2
+
+
 def _run_streaming(cmd: list[str], target: Path) -> tuple[int, str]:
     """Run a command while streaming combined output and retaining it for checks."""
     proc = subprocess.Popen(
@@ -302,6 +348,8 @@ def _run_streaming(cmd: list[str], target: Path) -> tuple[int, str]:
         stdout=subprocess.PIPE,
         stderr=subprocess.STDOUT,
         text=True,
+        # Undecodable bytes from a build tool must not crash the run.
+        errors="replace",
     )
     output_parts = []
     if proc.stdout is not None:
@@ -337,8 +385,7 @@ def cmd_detect(target: Path) -> int:
     """`detect` subcommand. Prints runner name to stdout; exit 2 on miss."""
     runner = detect_runner(target)
     if runner is None:
-        sys.stderr.write(f"no test runner detected at {target}\n")
-        return 2
+        return _report_no_runner(target)
     sys.stdout.write(runner + "\n")
     return 0
 
@@ -362,7 +409,11 @@ def cmd_run(
         if cmd_str is None:
             sys.stderr.write(".jig/test-command is empty (no runnable command found)\n")
             return 2
-        argv = shlex.split(cmd_str)
+        try:
+            argv = shlex.split(cmd_str)
+        except ValueError as exc:
+            sys.stderr.write(f".jig/test-command cannot be parsed: {exc}\n")
+            return 2
         # Bug 021: targeting is opt-in — a {test} token declares where the
         # selector belongs. Refusing beats silently running the whole suite,
         # which consumers (bug.py's red→green teeth) would misread as a
@@ -385,22 +436,21 @@ def cmd_run(
             except (FileNotFoundError, OSError):
                 sys.stderr.write(f"{argv[0]}: command failed to start\n")
                 return 2
-            if _selector_missed("custom", returncode, output):
+            if returncode == 1 and _selector_missed("custom", returncode, output):
                 sys.stderr.write(f"unresolved selector: {test_selector}\n")
                 return 2
-            return 0 if returncode == 0 else 1
+            return _custom_exit(returncode)
         argv = [tok for tok in argv if tok != CUSTOM_SELECTOR_PLACEHOLDER]
         try:
             result = subprocess.run(argv, cwd=str(target))
         except (FileNotFoundError, OSError):
             sys.stderr.write(f"{argv[0]}: command failed to start\n")
             return 2
-        return 0 if result.returncode == 0 else 1
+        return _custom_exit(result.returncode)
 
     runner = detect_runner(target)
     if runner is None:
-        sys.stderr.write(f"no test runner detected at {target}\n")
-        return 2
+        return _report_no_runner(target)
 
     # Pre-flight: verify module availability for module-based runners.
     # `python3 -m pytest` exits 1 with stderr "No module named pytest" when
@@ -461,8 +511,10 @@ def main(argv: list) -> int:
             test_path = Path(ns.test_path).resolve() if ns.test_path else None
             return cmd_run(target, test_path, ns.test)
     except Exception as exc:  # noqa: BLE001 — surface programming errors clearly.
+        # Exit 2, never 1: a helper crash is not a failing test (ADR-0068 —
+        # bug.py would stamp a witnessed red on exit 1).
         sys.stderr.write(f"tdd.py failed: {exc}\n")
-        return 1
+        return 2
     return 2
 
 

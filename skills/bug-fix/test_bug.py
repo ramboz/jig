@@ -8,6 +8,7 @@ Run from the repo root:
 from __future__ import annotations
 
 import os
+import shlex
 import subprocess
 import sys
 import tempfile
@@ -2035,6 +2036,56 @@ class Bug021GateSurfacesTargetingRefusalTests(unittest.TestCase):
         # The failed attempt is carried forward as evidence, with the report.
         self.assertEqual(self._fm()["status"], "DIAGNOSING")
         self.assertIn("unresolved selector", self._bug().read_text())
+
+
+class Spec123CustomCommandGateTests(_BugTransitionFixture):
+    """Spec 123 / ADR-0068: the bug-fix gates against the REAL tdd.py (no
+    JIG_TDD_HELPER stub) on the custom-command path and on the no-runner
+    dead end."""
+
+    def _fixing(self):
+        self._write_bug(status="ROOT_CAUSED", fix_class="local_patch")
+        return run_bug("transition", "001", "FIXING",
+                       "--project-dir", str(self.root))
+
+    def test_custom_command_exit_2_is_not_evidence_of_red(self):
+        # 123-01 AC6.
+        write(self.root / "exit2.py", "raise SystemExit(2)\n")
+        write(self.root / ".jig" / "test-command",
+              f"{shlex.quote(sys.executable)} exit2.py {{test}}\n")
+        r = self._fixing()
+        self.assertNotEqual(r.returncode, 0)
+        self.assertIn("not evidence of red", r.stderr)
+        self.assertIn("custom test command exited 2", r.stderr)
+        self.assertIn(".jig/test-command", r.stderr)
+        self.assertEqual(self._fm()["status"], "ROOT_CAUSED")
+        self.assertEqual(str(self._fm().get("red_confirmed_at") or ""), "")
+
+    def test_custom_command_exit_1_still_witnesses_red(self):
+        write(self.root / "exit1.py", "raise SystemExit(1)\n")
+        write(self.root / ".jig" / "test-command",
+              f"{shlex.quote(sys.executable)} exit1.py {{test}}\n")
+        r = self._fixing()
+        self.assertEqual(r.returncode, 0, r.stderr)
+        self.assertEqual(self._fm()["status"], "FIXING")
+        self.assertNotEqual(str(self._fm().get("red_confirmed_at") or ""), "")
+
+    def test_no_runner_gate_error_names_the_way_out(self):
+        # 123-02 AC3: an empty project has no runner; the gate error must
+        # carry tdd.py's guidance line, not just an exit code.
+        r = self._fixing()
+        self.assertNotEqual(r.returncode, 0)
+        self.assertIn("not evidence of red", r.stderr)
+        for needle in (".jig/test-command", "{test}", "0 = tests passed",
+                       "1 = a test ran and failed", "could not run",
+                       "build failure", "test-command-recipes.md"):
+            self.assertIn(needle, r.stderr)
+        self.assertEqual(self._fm()["status"], "ROOT_CAUSED")
+
+    def test_bug_fix_skill_links_contract_and_recipes(self):
+        text = (REPO_ROOT / "skills" / "bug-fix" / "SKILL.md").read_text()
+        self.assertIn("test-command-recipes.md", text)
+        self.assertIn("ADR-0068", text)
 
 
 class Bug039ReviewBackEdgeTests(_BugTransitionFixture):

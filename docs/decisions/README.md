@@ -68,6 +68,7 @@
 - [ADR-0064: Use-case progress rollup lives in jig as a bounded exception](adr-0064-use-case-progress-rollup-in-jig.md) — An owner of a project with many specs cannot tell whether the work is still advancing the product's goals. (2026-10-03, Accepted)
 - [ADR-0066: Component-agnostic design attestation](adr-0066-component-agnostic-design-attestation.md) — Jig needs reusable design attestation without shipping an application's proof of concept. (2026-10-22, Accepted)
 - [ADR-0067: Genesis spec 000 and a stub-free seed](adr-0067-genesis-spec-zero.md) — The worked example `scaffold-init` seeds moves to a genesis spec `000-adopt-jig` with no placeholder spec, so a project's own first spec is `001` instead of `003`. (2026-10-26, Accepted)
+- [ADR-0068: The custom test command is the runner extension point](adr-0068-no-per-framework-runner-adapters.md) — jig does not add a built-in test-runner adapter for Gradle or for any other framework it does not use itself; a project on another stack connects its tests through `.jig/test-command`, and that command's exit code now follows the same three-state contract as `tdd.py`: only exit 1 is a failing test. (2026-11-20, Accepted)
 - [ADR-0069: Owner review: a human-attested pass in the REVIEWED evidence set](adr-0069-owner-review-human-attested-evidence.md) — GitHub issue 254 (`ramboz/jig`) reports a slice that implemented three UX decisions taken on paper. (2026-11-25, Accepted)
 
 ## Lightweight decisions
