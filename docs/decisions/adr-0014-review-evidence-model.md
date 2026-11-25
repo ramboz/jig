@@ -405,3 +405,26 @@ event-keyed, with no deliverable mtime or git-log comparison. The general case
 under the original trigger. Original prose preserved above.
 
 - Link: [bug 039](../bugs/039-reviewed-fixing-back-edge-rejected.md)
+
+### 2026-11-20 — The frame-critique gate is keyed on the edge (§5 ungated list narrowed)
+
+§5's list of ungated transitions predates slice 064-03's pre-implementation
+frame-critique gate, which was attached to the `READY_FOR_REVIEW` target
+alone. Because `transition` enforces no state ordering, a flagged slice
+refused at `READY_FOR_REVIEW` could name a later state and skip the gate
+([bug 042](../bugs/042-frame-critique-gate-skipped-past-ready-for-review.md),
+GitHub issue 251). Owner-approved correction: for a slice declaring
+`frame_review: true`, → `READY_FOR_IMPLEMENTATION` and → `IN_PROGRESS` are no
+longer ungated when the slice moves from a pre-implementation state (`DRAFT`,
+`READY_FOR_REVIEW`, `READY_FOR_IMPLEMENTATION`, or no recognised status). The
+same holds for a direct jump to `REVIEWED` / `RECONCILED` / `DONE`. Such a move
+re-validates the `READY_FOR_REVIEW` evidence set (the frame-critique `pass`),
+the way `DONE` re-validates `REVIEWED` + `RECONCILED`. Unchanged: unflagged
+slices, the two review back-edges and any release out of `IN_PROGRESS` or a
+review state (code already exists there), the `JIG_REVIEW_EVIDENCE_GATE`
+bypass, and the rule that frame-critique is not re-validated on the normal
+walk to `DONE`. This applies §5's own principle, that a skipped or
+hand-edited status cannot walk past a gate an earlier transition enforces;
+no decision changes. Original prose preserved above.
+
+- Link: [bug 042](../bugs/042-frame-critique-gate-skipped-past-ready-for-review.md)
