@@ -270,7 +270,9 @@ def required_passes(stage: str, *, arch_review: bool,
     """Return the passes required to enter `stage` (ADR-0014 §5 map).
 
     - ``READY_FOR_REVIEW`` → ``frame-critique`` iff the slice/spec
-      declared ``frame_review: true`` (slice 064-03 / ADR-0020), else
+      declared ``frame_review: true`` (slice 064-03 / ADR-0020; the caller,
+      ``workflow._gate_frame_critique``, also requires this stage's set on
+      any forward move past READY_FOR_REVIEW — bug 042), else
       empty. This is the only PRE-implementation gate: the adversarial
       frame-critique runs before any code exists.
     - ``REVIEWED`` → ``compliance`` + ``craft`` (+ ``arch`` iff the slice

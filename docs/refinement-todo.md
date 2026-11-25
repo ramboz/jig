@@ -474,6 +474,18 @@ schema.
 **Resolution trigger:** AC6's interactivity proxy is changed so non-TTY/agent lands *can* consume the budget (e.g. harness detection), OR a report shows the nudge repeating for a human-TTY land across worktrees. Then repo-scope the breadcrumb by **reusing** bug 040's git-common-dir resolution — generalize `suggestion_state_path` (or factor out its `_git_common_dir`) to take a state-file name, rather than duplicating `git rev-parse --git-common-dir` in `land.py` — keep the TTY gate, and drop the `.jig/servo-hint-shown` ignore entries in `.gitignore` + `scaffold.py` `_GITIGNORE_SECRET_PATTERNS` (keeping them for existing checkouts that still hold one is harmless). Do not act before bug 040's helper has landed on `main`.
 **Origin:** 2026-10-04 bug-040 closure inventory, which flagged `land.py:721` as convergent once-per-project logic.
 
+### Decision: enforce the *derived* `frame_review` flag at `transition` (bug 042 follow-up)
+**Deferred — found 2026-11-20 while fixing [bug 042](bugs/042-frame-critique-gate-skipped-past-ready-for-review.md) (issue 251).** The frame-critique gate reads the flag the author **declares** in slice frontmatter. `derive_frame_review` has one caller, the `frame-review-needed` CLI, which only prints the value; `transition` never derives it. A slice whose spec carries real `## Assumptions` but whose author never copied the flag in is ungated at every state. Enforcing the derived value is not a small fix: the deriver reads the *spec-level* `## Assumptions`, so it would flag every slice of such a spec (including the inline-mirror / refactor slices SKILL.md says stay default-off) and would newly gate existing downstream specs on upgrade. It changes [ADR-0020](decisions/adr-0020-spec-frame-hardening.md)'s trigger model ("derived trigger set by the author/clarify step").
+
+**Resolution trigger:** a report of a slice with a non-empty `## Assumptions` reaching `IN_PROGRESS` unflagged and shipping a frame error the pass would have caught, OR the next ADR-0020 revision. Options to weigh then: a non-blocking warning at `→ READY_FOR_REVIEW` when derived ≠ declared; an explicit `frame_review: false` required to opt out; a per-slice deriver.
+**Origin:** bug 042 `## Root cause` ("Second hole checked").
+
+### Decision: review flags are never read for embedded-layout slices (bug 042 follow-up)
+**Deferred — found 2026-11-20 in bug 042's review round 1.** `review_evidence._slice_field` runs `parse_frontmatter` on the raw slice section. For an embedded slice (a `## Slice` block inside `spec.md`) the section starts with the heading and the frontmatter regex is anchored at the start, so no flag is read: `frame_review`, `arch_review`, `code_health_review` and `design_review` are all silently false, and the conditional passes are never required. `workflow.py` reads the same fields through `_slice_frontmatter`, which strips the heading first, so `session_plan` dispatches a pass the gate then does not require. Slice-file layout (`slice-NN-*.md`, the convention since spec 018) is unaffected. Bug 042's fix follows the validator's reader, so it neither widens nor narrows this.
+
+**Resolution trigger:** any project still on embedded slices reports a flagged pass not being required, OR the two slice-status/frontmatter readers are unified (see "unify the two slice-status readers" above) — fix it there by lifting `_split_slice_section` into `_common/parsing.py`.
+**Origin:** bug 042 bug-review + craft, round 1.
+
 ### Decision: owner-review — bind the owner's verdict to a build, not to the ask time
 
 ADR-0069 decision 6 / spec 124. The owner-review gate ties the owner's

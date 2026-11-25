@@ -1045,19 +1045,95 @@ def _lookup_adr_accepted(decisions_dir: Path, num: str) -> tuple:
 # compliance+craft(+arch); RECONCILED → reconciliation + deviation log +
 # reconciliation sweep;
 # DONE → the REVIEWED + RECONCILED sets re-validated (plus the existing
-# dependency check) — frame-critique is NOT re-validated at DONE (one-time
-# pre-implementation gate). Every OTHER target — DRAFT /
-# READY_FOR_IMPLEMENTATION / IN_PROGRESS / DEFERRED, the DEFERRED→DRAFT
-# re-open, and the two review back-edges (REVIEWED→IN_PROGRESS,
-# RECONCILED→IN_PROGRESS) — relaxes or advances status with nothing to gate
-# and is left untouched (AC4). An unflagged READY_FOR_REVIEW transition is
-# similarly free (empty required set).
+# dependency check) — frame-critique is NOT re-validated at DONE on the
+# normal walk (one-time pre-implementation gate). DRAFT / DEFERRED, the
+# DEFERRED→DRAFT re-open, and the two review back-edges
+# (REVIEWED→IN_PROGRESS, RECONCILED→IN_PROGRESS) relax status and are
+# ungated for every slice (AC4). READY_FOR_IMPLEMENTATION / IN_PROGRESS are
+# ungated for an unflagged slice; for a flagged one see bug 042 below. An
+# unflagged READY_FOR_REVIEW transition is similarly free (empty required
+# set).
 # Slice 064-03 / ADR-0020 added READY_FOR_REVIEW: it gates the
 # pre-implementation frame-critique pass iff the slice declares
 # `frame_review: true` (an unflagged slice yields an empty required set →
 # no gating, so existing specs transition DRAFT → READY_FOR_REVIEW freely).
-# This is the only PRE-implementation evidence gate.
+#
+# Bug 042 (GitHub issue 251): that pre-implementation gate is a property of
+# the EDGE, not of the READY_FOR_REVIEW target. `transition` enforces no
+# state ordering, so a target-keyed check let a flagged slice refused at
+# READY_FOR_REVIEW walk DRAFT → READY_FOR_IMPLEMENTATION → IN_PROGRESS
+# untouched. A `frame_review: true` slice now also needs the frame-critique
+# `pass` to LEAVE the pre-implementation zone for any state past
+# READY_FOR_REVIEW — see `_crosses_frame_gate` / `_gate_frame_critique`.
 _EVIDENCE_GATED_STATES = ("READY_FOR_REVIEW", "REVIEWED", "RECONCILED", "DONE")
+
+# Bug 042: the states that lie past the pre-implementation frame-critique
+# gate, and the subset in which the slice's code already exists.
+_PAST_FRAME_GATE_STATUSES = (
+    "READY_FOR_IMPLEMENTATION", "IN_PROGRESS", "REVIEWED", "RECONCILED",
+    "DONE")
+_IMPLEMENTATION_STARTED_STATUSES = (
+    "IN_PROGRESS", "REVIEWED", "RECONCILED", "DONE")
+
+
+def _crosses_frame_gate(spec_md: Path, slice_fragment: str,
+                        current_status: str | None,
+                        new_status: str) -> bool:
+    """Bug 042: does this move carry a `frame_review: true` slice out of the
+    pre-implementation zone, past the frame-critique gate?
+
+    True iff the slice declares the flag, the target lies past
+    READY_FOR_REVIEW, and implementation has NOT already started. The last
+    clause keeps the gate on the forward edge: back-edges, an IN_PROGRESS
+    release and the walk to DONE start where code exists, so there is
+    nothing pre-implementation left to protect and a refusal would strand
+    the slice. Any other origin — including a missing or unrecognised
+    status — counts as pre-implementation (fails closed).
+
+    Reads the DECLARED flag through the validator's own reader, so this
+    predicate and `validate_evidence` cannot disagree; nothing derives it."""
+    if new_status not in _PAST_FRAME_GATE_STATUSES:
+        return False
+    if current_status in _IMPLEMENTATION_STARTED_STATUSES:
+        return False
+    try:
+        return _evidence._frame_review_flag(spec_md, slice_fragment)
+    except _evidence.EvidenceError:
+        # Unresolvable slice (not reachable from `transition`, which has
+        # already loaded it): fail closed and let the validator report it.
+        return True
+
+
+def _gate_frame_critique(spec_md: Path, slice_fragment: str,
+                         new_status: str, crosses_frame_gate: bool) -> None:
+    """The pre-implementation frame-critique gate (slice 064-03 / ADR-0020;
+    edge-keyed since bug 042). Required iff the slice declares
+    `frame_review: true`, on entry to READY_FOR_REVIEW and on any move that
+    `_crosses_frame_gate`. ONE-TIME: not re-validated on the normal walk to
+    DONE (the frame is critiqued before code exists, not re-litigated at
+    close). An unflagged slice yields an empty required set → no gating.
+
+    `transition` calls this BEFORE any claim bookkeeping: a refused
+    `→ IN_PROGRESS` must not leave a `refs/claims/<N>` reservation (or a
+    pushed one) behind for a slice that never started.
+
+    Raises `WorkflowError` with the same diagnostic shape as
+    `_gate_evidence`. Silent under the `JIG_REVIEW_EVIDENCE_GATE` bypass:
+    the audit event is `_gate_evidence`'s job, emitted once, after the
+    claim refusals — so a transition that is refused anyway logs none."""
+    if new_status != "READY_FOR_REVIEW" and not crosses_frame_gate:
+        return
+    if not _evidence_gate_enabled():
+        return
+    diagnostics = validate_evidence(spec_md, slice_fragment,
+                                    "READY_FOR_REVIEW")
+    if diagnostics:
+        joined = "\n  - ".join(diagnostics)
+        raise WorkflowError(
+            f"cannot transition to {new_status} — review evidence is "
+            f"incomplete (ADR-0014 §5):\n  - " + joined
+        )
+
 
 # The review-evidence gate enable/disable predicate is shared with the
 # ADR-side accept gate (slice 064-05): both read `JIG_REVIEW_EVIDENCE_GATE`
@@ -1070,12 +1146,16 @@ _EVIDENCE_GATED_STATES = ("READY_FOR_REVIEW", "REVIEWED", "RECONCILED", "DONE")
 
 
 def _gate_evidence(spec_md: Path, slice_fragment: str, section: str,
-                   new_status: str) -> None:
+                   new_status: str, *, crosses_frame_gate: bool) -> None:
     """Enforce the ADR-0014 §5 evidence requirements for a gated transition.
 
     Raises `WorkflowError` (the user-facing type → CLI exit 2) with a
     diagnostic that names the missing/invalid artifact and the command to
     produce it (AC3). No-op for ungated states or when the gate is disabled.
+    The pre-implementation frame-critique requirement is edge-keyed and
+    validated earlier by `_gate_frame_critique` (bug 042); this function
+    only logs its bypass — for a READY_FOR_REVIEW target or a move that
+    `crosses_frame_gate` — so every bypassed transition logs exactly once.
 
     Delegates shape/verdict validation to
     `review_evidence.validate_evidence` (the 045-02 validator — single
@@ -1083,7 +1163,7 @@ def _gate_evidence(spec_md: Path, slice_fragment: str, section: str,
     `_common.parsing` predicates. The gate only checks subsection shape;
     reviewers attest content quality.
     """
-    if new_status not in _EVIDENCE_GATED_STATES:
+    if new_status not in _EVIDENCE_GATED_STATES and not crosses_frame_gate:
         return
     if not _evidence_gate_enabled():
         # Spec 078-01: the gate is honoring its deliberateness override —
@@ -1097,16 +1177,6 @@ def _gate_evidence(spec_md: Path, slice_fragment: str, section: str,
         return
 
     diagnostics: list = []
-    # READY_FOR_REVIEW-stage: the adversarial frame-critique pass, required
-    # iff the slice declares `frame_review: true` (slice 064-03 / ADR-0020).
-    # This is a ONE-TIME pre-implementation gate — deliberately NOT added to
-    # the DONE re-validation below (DONE re-runs REVIEWED + RECONCILED only;
-    # the frame is critiqued once, before code exists, not re-litigated at
-    # close). An unflagged slice yields an empty required set → no gating.
-    if new_status == "READY_FOR_REVIEW":
-        diagnostics.extend(
-            validate_evidence(spec_md, slice_fragment, "READY_FOR_REVIEW")
-        )
     # REVIEWED-stage evidence is required for REVIEWED and re-validated for
     # DONE (ADR-0014 §5: DONE re-runs REVIEWED + RECONCILED).
     if new_status in ("REVIEWED", "DONE"):
@@ -1375,6 +1445,12 @@ def transition(spec_md: Path, slice_fragment: str, new_status: str, *,
     deviation log and reconciliation sweep are present). The gate is ON
     by default; bypass with `JIG_REVIEW_EVIDENCE_GATE=0`.
 
+    Slice 064-03 / bug 042: a `frame_review: true` slice additionally
+    needs a passing frame-critique verdict to enter READY_FOR_REVIEW and
+    to move from a pre-implementation state to anything past it
+    (`_crosses_frame_gate`) — skipping READY_FOR_REVIEW does not skip the
+    gate. Same bypass.
+
     Slice 049-01, as amended by ADR-0045: the lifecycle splits two ways
     for ownership. A transition into a WORKING state
     (`_CLAIM_WORKING_STATUSES` — READY_FOR_REVIEW / IN_PROGRESS /
@@ -1528,6 +1604,16 @@ def transition(spec_md: Path, slice_fragment: str, new_status: str, *,
         if freshness_warning:
             sys.stderr.write(freshness_warning.rstrip() + "\n")
 
+    # Slice 064-03 / bug 042: the pre-implementation frame-critique gate.
+    # Runs HERE — after the read-only cross-ref refusals, before the claim
+    # machinery — because `→ IN_PROGRESS` reserves `refs/claims/<N>` (and
+    # may push it) below; a refusal after that would strand a reservation
+    # for a slice that never started.
+    crosses_frame_gate = _crosses_frame_gate(
+        spec_md, slice_fragment, current_status, new_status)
+    _gate_frame_critique(spec_md, slice_fragment, new_status,
+                         crosses_frame_gate)
+
     # Slice 049-01: claim context. Claims live in slice frontmatter, so the
     # claim machinery is a no-op for legacy prose-only (no-frontmatter)
     # slices — stamping a field there would synthesize a spurious `---`
@@ -1566,10 +1652,12 @@ def transition(spec_md: Path, slice_fragment: str, new_status: str, *,
         # Wording notes, both from the craft pass: (a) this fires BEFORE the
         # evidence gate and the start-collision guard, either of which can
         # still refuse, so it must not assert a completed takeover; (b) the
-        # suggested `--release` target is the ungated
-        # READY_FOR_IMPLEMENTATION (mirroring the refusal above) rather than
-        # `current_status`, which may be an evidence-gated state or `None` on
-        # a slice with neither a frontmatter `status:` nor a prose marker.
+        # suggested `--release` target is READY_FOR_IMPLEMENTATION
+        # (mirroring the refusal above) rather than `current_status`, which
+        # may be an evidence-gated state or `None` on a slice with neither a
+        # frontmatter `status:` nor a prose marker. `--release` does not
+        # skip the frame-critique gate (bug 042): a flagged slice still in
+        # READY_FOR_REVIEW without its pass must be released to DRAFT.
         if foreign:
             where = (f" (status {current_status})" if current_status
                      else "")
@@ -1677,8 +1765,11 @@ def transition(spec_md: Path, slice_fragment: str, new_status: str, *,
     # (ADR-0014 §5). Runs AFTER the DONE dependency check so a missing
     # dependency surfaces on its own; raises WorkflowError before any status
     # write. No-op for ungated targets, the review back-edges, and when the
-    # gate is bypassed via JIG_REVIEW_EVIDENCE_GATE.
-    _gate_evidence(spec_md, slice_fragment, section, new_status)
+    # gate is bypassed via JIG_REVIEW_EVIDENCE_GATE. (The frame-critique
+    # gate already validated, above the claim bookkeeping; its bypass is
+    # logged here.)
+    _gate_evidence(spec_md, slice_fragment, section, new_status,
+                   crosses_frame_gate=crosses_frame_gate)
 
     m = _STATUS_MARKER_RE.search(section)
     old_status = None

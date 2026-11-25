@@ -131,3 +131,20 @@ gated transition — not hot-path).
 **Tests.** Full suite green via `tdd.py run .` (exit 0, 1563 tests, 3 skipped).
 
 **Deferred decisions.** None new.
+
+## Amendments
+
+> Per [ADR-0010](../../decisions/adr-0010-amendment-scope-records-vs-live-prose.md):
+> this closed record's original ACs and deviation log are preserved above;
+> dated entries below record later overrides.
+
+- **2026-11-20 ([bug 042](../../bugs/042-frame-critique-gate-skipped-past-ready-for-review.md), GitHub issue 251):**
+  The deviation log's "Ungated (AC4)" list (DRAFT / READY_FOR_REVIEW /
+  READY_FOR_IMPLEMENTATION / IN_PROGRESS / DEFERRED, DEFERRED→DRAFT, and the
+  two back-edges) was accurate at close, before any pre-implementation gate
+  existed. Since slice 064-03 it holds for unflagged slices and for the
+  back-edges only. A `frame_review: true` slice moving from a
+  pre-implementation state to `READY_FOR_IMPLEMENTATION` or `IN_PROGRESS`
+  (or straight to a review state) now needs the frame-critique `pass`. AC4
+  itself is unchanged: its "unless the ADR explicitly changes them" clause
+  is met by ADR-0014's 2026-11-20 amendment, which owns the decision.
