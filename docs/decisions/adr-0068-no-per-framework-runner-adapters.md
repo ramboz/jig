@@ -162,7 +162,7 @@ deaths as red, for backward compatibility.
    - `bug.py` `→ REVIEWED` treats any non-zero exit as a failed fix and
      routes the record back to `DIAGNOSING`. That is unchanged by this
      decision and is wrong for an environment error; it is tracked as
-     [bug 043](../bugs/043-reviewed-gate-env-error-reopens-bug.md), because
+     [bug 044](../bugs/044-reviewed-gate-env-error-reopens-bug.md), because
      the back-edge belongs to the bug lifecycle (ADR-0016), not to the runner
      contract.
 3. **The dead end names the way out.** When no runner is detected,
@@ -208,7 +208,7 @@ deaths as red, for backward compatibility.
   a whole-suite pytest run. jig's own custom command has the same flaw from
   the inside: `scripts/run_tests.py` exits 1 for a test module that fails to
   import. Tracked as
-  [bug 042](../bugs/042-builtin-runners-read-load-failure-as-red.md).
+  [bug 043](../bugs/043-builtin-runners-read-load-failure-as-red.md).
 - `slice-land` now blocks on any detected runner that could not run. That
   includes built-in cases which exited 2 before this decision and were shown
   as the doc-only warning (pytest module not installed, runner binary

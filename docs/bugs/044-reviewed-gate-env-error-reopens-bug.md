@@ -15,7 +15,7 @@ escalated_to:
 closure_schema: 1
 ---
 
-# Bug 043: reviewed-gate-env-error-reopens-bug
+# Bug 044: reviewed-gate-env-error-reopens-bug
 
 Reported: found while implementing spec 123 (issue 250), 2026-11-20. Not fixed there by the owner's instruction.
 

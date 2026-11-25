@@ -138,7 +138,13 @@ stamp count, so the previous round cannot re-clear changed work (see
 [Post-implementation review](#post-implementation-review) and
 [Reconciliation rules](#reconciliation-rules) below). No `Stop` hook is
 involved — the task-capture `Stop` hook is a nudge that blocks nothing; the
-deterministic gate lives in the transition helper. State names match
+deterministic gate lives in the transition helper. One gate sits *before*
+implementation: a slice declaring `frame_review: true` needs a passing
+`frame-critique` verdict to enter `READY_FOR_REVIEW` and to move from any
+pre-implementation state to `READY_FOR_IMPLEMENTATION`, `IN_PROGRESS` or
+beyond, so naming a later state does not skip it (bug 042). Back-edges and
+releases out of `IN_PROGRESS` or a review state are not re-gated on it, and
+unflagged slices may skip states freely. State names match
 `VALID_STATUSES` in
 [skills/spec-workflow/workflow.py](../skills/spec-workflow/workflow.py).
 

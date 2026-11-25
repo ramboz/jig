@@ -15,7 +15,7 @@ escalated_to:
 closure_schema: 1
 ---
 
-# Bug 042: builtin-runners-read-load-failure-as-red
+# Bug 043: builtin-runners-read-load-failure-as-red
 
 Reported: found while implementing spec 123 (issue 250), 2026-11-20. Not fixed there by the owner's instruction.
 
